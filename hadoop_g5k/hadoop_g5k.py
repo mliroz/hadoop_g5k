@@ -14,6 +14,8 @@ from execo_g5k.api_utils import get_host_attributes
 from os import listdir
 from os.path import join
 
+import ConfigParser
+
 __user_login = getpass.getuser()
 
 # Constant definitions
@@ -30,29 +32,42 @@ DEFAULT_HADOOP_MR_PORT = 54311
 
 DEFAULT_HADOOP_LOCAL_CONF_DIR = "/home/" + getpass.getuser() + "/common/hadoop/conf"
 
+class NotInitialized: pass
 
 class HadoopCluster:
   
-  # TODO - default timeout
-  #default_timeout = 1
-  
-  # TODO - provisionally fixed parameters
-  hadoop_base_dir = DEFAULT_HADOOP_BASE_DIR
-  hadoop_conf_dir = DEFAULT_HADOOP_CONF_DIR
-  hadoop_logs_dir = DEFAULT_HADOOP_LOGS_DIR
-  hdfs_port = DEFAULT_HADOOP_HDFS_PORT
-  mapred_port = DEFAULT_HADOOP_MR_PORT
-  
-  local_base_conf_dir = DEFAULT_HADOOP_LOCAL_CONF_DIR
-    
   # Cluster state
   initialized = False
   running = False
   running_dfs = False
   running_map_reduce = False
       
-  def __init__(self, hosts, topology = None):
+  def __init__(self, hosts, topology = None, propsFile = None):
     """Creates a new Hadoop cluster with the given hosts and topology"""
+    
+    # Load cluster properties
+    defaults = {
+      "hadoop_base_dir" : DEFAULT_HADOOP_BASE_DIR,
+      "hadoop_conf_dir" : DEFAULT_HADOOP_CONF_DIR,
+      "hadoop_logs_dir" : DEFAULT_HADOOP_LOGS_DIR,
+      "hdfs_port" : str(DEFAULT_HADOOP_HDFS_PORT),
+      "mapred_port" : str(DEFAULT_HADOOP_MR_PORT),
+
+      "local_base_conf_dir" : DEFAULT_HADOOP_LOCAL_CONF_DIR
+    }    
+    config = ConfigParser.ConfigParser(defaults)
+    config.add_section("cluster")
+    config.add_section("local")
+    
+    if propsFile:
+      config.readfp(open(propsFile))
+      
+    self.hadoop_base_dir = config.get("cluster","hadoop_base_dir")
+    self.hadoop_conf_dir = config.get("cluster","hadoop_conf_dir")
+    self.hadoop_logs_dir = config.get("cluster","hadoop_logs_dir")
+    self.hdfs_port = config.getint("cluster","hdfs_port")
+    self.mapred_port = config.getint("cluster","mapred_port")
+    self.local_base_conf_dir = config.get("local","local_base_conf_dir")
     
     # Configure master and slaves
     self.hosts = hosts
@@ -115,6 +130,11 @@ class HadoopCluster:
     self.format_dfs()
     
     self.initialized = True
+     
+  def __check_initialization(self):
+    if not self.initialized:
+      logger.error("The cluster should be initialized")
+      raise NotInitialized()
     
   def __configure_servers(self):  
     """Configure servers and host-dependant parameters (TODO - we assume all nodes are equal)"""
@@ -197,6 +217,9 @@ class HadoopCluster:
     
   def start(self):
     """Starts the namenode and then the jobtracker"""
+    
+    self.__check_initialization()
+    
     self.start_dfs()
     self.start_map_reduce()
     
@@ -204,6 +227,9 @@ class HadoopCluster:
     
   def start_and_wait(self):
     """Starts the namenode and then the jobtracker. It waits for them to exit safemode""""""Documentation"""
+    
+    self.__check_initialization()
+    
     self.start_dfs_and_wait()
     self.start_map_reduce_and_wait()
     
@@ -211,6 +237,8 @@ class HadoopCluster:
     
   def start_dfs(self):
     """Starts the namenode"""
+    
+    self.__check_initialization()
     
     logger.info("Starting HDFS")
     
@@ -224,6 +252,8 @@ class HadoopCluster:
       
   def start_dfs_and_wait(self):
     """Starts the namenode and wait for it to exit safemode"""
+    
+    self.__check_initialization()    
     
     self.start_dfs()
     
@@ -240,6 +270,8 @@ class HadoopCluster:
   def start_map_reduce(self):
     """Starts the jobtracker"""
     
+    self.__check_initialization()
+    
     logger.info("Starting MapReduce")
     
     proc = SshProcess(self.hadoop_base_dir + "/bin/start-mapred.sh", self.master)
@@ -253,6 +285,8 @@ class HadoopCluster:
   def start_map_reduce_and_wait(self):
     """Starts the jobtracker and wait for it to exit safemode"""
     
+    self.__check_initialization()   
+    
     self.start_map_reduce()
     
     #logger.info("Waiting for safe mode to be off")
@@ -264,6 +298,9 @@ class HadoopCluster:
     
   def stop(self):
     """Stops the jobtracker and then the namenode"""
+    
+    self.__check_initialization() 
+    
     self.stop_map_reduce()
     self.stop_dfs()
     
@@ -272,6 +309,8 @@ class HadoopCluster:
     
   def stop_dfs(self):
     """Stops the namenode"""
+    
+    self.__check_initialization()   
     
     logger.info("Stopping HDFS")
     
@@ -287,6 +326,8 @@ class HadoopCluster:
   def stop_map_reduce(self):
     """Stopts the jobtracker"""
     
+    self.__check_initialization()   
+    
     logger.info("Stopping MapReduce")
     
     proc = SshProcess(self.hadoop_base_dir + "/bin/stop-mapred.sh", self.master)
@@ -298,11 +339,15 @@ class HadoopCluster:
       self.running_map_reduce = False      
       
   
-  def execute(self, command, node = None):
+  def execute(self, command, node = None, should_be_running = True):
     """Executes the given command in the given node.
        If it is not provided, it is executed in the master"""
        
-    if not self.running:
+    if not self.initialized:
+      logger.error("The cluster should be initialized")
+      return       
+       
+    if should_be_running and not self.running:
       logger.warn("The cluster was stopped. Starting it automatically")
       self.start()
     
@@ -320,6 +365,10 @@ class HadoopCluster:
   def execute_jar(self, jar_path, params = [], lib_paths = [], node = None):
     """Executes the mapreduce job included in the given jar_path. A list of libraries
        to be copied along with the main jar file and a set of params can be in"""
+       
+    if not self.initialized:
+      logger.error("The cluster should be initialized")
+      return       
        
     if not node:
       node = self.master       
@@ -367,13 +416,16 @@ class HadoopCluster:
   def copy_history(self, dest):
     """Copy history logs from master"""
     
+    if not os.path.exists(dest):
+      logger.warning("Destination directory " + dest + " does not exist. It will be created")
+    
     remoteFiles = [ join(self.hadoop_logs_dir,"history") ]
     action = Get([self.master], remoteFiles, dest)
     action.run()  
     
     
   def clean_conf(self):
-    """Clean configuration files used by this cluster"""
+    """Clean configuration files used by this cluster""" 
     
     shutil.rmtree(self.conf_dir)    
     
@@ -432,6 +484,14 @@ class HadoopCluster:
     self.clean_data()
     
     self.initialized = False
+    
+    
+  def get_version(self):
+       
+    proc = SshProcess(self.hadoop_base_dir + "/bin/hadoop version", self.master)
+    proc.run()
+    version = proc.stdout.splitlines()[0]
+    return version
     
   # End HadoopCluster ########################################################## 
   
@@ -530,6 +590,12 @@ if __name__ == "__main__":
                 nargs=1,
                 metavar="NODE",
                 help="Node where the action will be executed. Applies only to --execute and --jarjob")                      
+                
+  parser.add_argument("--properties",
+                dest="properties",
+                nargs=1,
+                action="store",
+                help="File containing the properties to be used. Applies only to --create")                                                
   
   object_group = parser.add_mutually_exclusive_group()
   
@@ -569,16 +635,27 @@ if __name__ == "__main__":
                 action="store",
                 nargs="+",
                 metavar=("JAR_PATH","PARAM"),
-                help="Copies the jar file and executes it with the specified parameters")
+                help="Copy the jar file and execute it with the specified parameters")
+                
+  parser.add_argument("--copyhistory",
+                  action="store",
+                  nargs=1,
+                  metavar="LOCAL_PATH",                
+                  help="Copies history to the specified path")                
                 
   parser.add_argument("--clean",
                 dest="clean",
                 action="store_true",
-                help="Removes hadoop logs and cleans the dfs")
+                help="Remove hadoop logs and clean the dfs")
+                
+  parser.add_argument("--state",
+                dest="state",
+                action="store_true",
+                help="Show the cluster state")                
                 
   parser.add_argument("-h", "--help",
                 action="help",
-                help="show this help message and exit")
+                help="Show this help message and exit")
   
   args = parser.parse_args()
 
@@ -598,6 +675,11 @@ if __name__ == "__main__":
       
   logger.info("Using id = " + str(id))
   
+  # Check node specification
+  if args.node:
+    if not (args.execute or args.jarjob):
+      logger.warn("--node only applies to --execute or --jarjob")
+  
   # Create or load object
   hc_file_name = os.path.join(hg5k_tmp_dir,str(id))
   if args.create:
@@ -607,7 +689,11 @@ if __name__ == "__main__":
       sys.exit(1)
     
     hosts = __generate_hosts(args.create[0])
-    hc = HadoopCluster(hosts)
+    
+    if args.properties:
+      hc = HadoopCluster(hosts, None, args.properties[0])
+    else:
+      hc = HadoopCluster(hosts)
     
   elif args.delete:
 
@@ -634,16 +720,44 @@ if __name__ == "__main__":
     hc.start_and_wait()
   
   if args.execute:
-    hc.execute(args.execute[0])
+    if args.node:
+      hc.execute(args.execute[0], args.node[0])
+    else:
+      hc.execute(args.execute[0])
   
   if args.jarjob:
     if len(args.jarjob) > 1:
-      hc.execute_jar(args.jarjob[0], args.jarjob[1:])
+      if args.node:
+        hc.execute_jar(args.jarjob[0], args.jarjob[1:], [], args.node[0])
+      else:
+        hc.execute_jar(args.jarjob[0], args.jarjob[1:])
     else:
-      hc.execute_jar(args.jarjob[0])
+      if args.node:
+        hc.execute_jar(args.jarjob[0], [], [], args.node[0])
+      else:
+        hc.execute_jar(args.jarjob[0])
+      
+  if args.copyhistory:
+    hc.copy_history(args.copyhistory[0])
+      
+  if args.state:
+    logger.info("---------------------------------------------------------")
+    logger.info("Hadoop Cluster with ID " + str(id))
+    logger.info("  Version: " + hc.get_version())
+    logger.info("  Master: " + str(hc.master))
+    logger.info("  Hosts: " + str(hc.hosts))
+    logger.info("  Topology: " + str(hc.topology))
+    if hc.initialized:
+      if hc.running:
+        logger.info("The cluster is running")
+      else:
+        logger.info("The cluster is stopped")
+    else:
+      logger.info("The cluster is not initialized")
+    logger.info("---------------------------------------------------------")
     
   if args.stop:
-    hc.stop()    
+    hc.stop()
   
   if args.clean:
     hc.clean()
