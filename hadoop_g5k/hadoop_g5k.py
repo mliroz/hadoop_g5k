@@ -16,9 +16,20 @@ from os.path import join
 
 __user_login = getpass.getuser()
 
-core_conf_file = "core-site.xml"
-hdfs_conf_file = "hdfs-site.xml"
-mr_conf_file = "mapred-site.xml"
+# Constant definitions
+CORE_CONF_FILE = "core-site.xml"
+HDFS_CONF_FILE = "hdfs-site.xml"
+MR_CONF_FILE = "mapred-site.xml"
+
+DEFAULT_HADOOP_BASE_DIR = "/opt/base/hadoop"
+DEFAULT_HADOOP_CONF_DIR = DEFAULT_HADOOP_BASE_DIR + "/conf"
+DEFAULT_HADOOP_LOGS_DIR = "/opt/base/logs/hadoop"
+
+DEFAULT_HADOOP_HDFS_PORT = 54310
+DEFAULT_HADOOP_MR_PORT = 54311
+
+DEFAULT_HADOOP_LOCAL_CONF_DIR = "/home/" + getpass.getuser() + "/common/hadoop/conf"
+
 
 class HadoopCluster:
   
@@ -26,14 +37,13 @@ class HadoopCluster:
   #default_timeout = 1
   
   # TODO - provisionally fixed parameters
-  hadoop_base_dir = "/opt/base/hadoop"
-  hadoop_conf_dir = "/opt/base/hadoop/conf"
-  hadoop_logs_dir = "/opt/base/logs/hadoop"
-  hdfs_port = 54310
-  mapred_port = 54311
+  hadoop_base_dir = DEFAULT_HADOOP_BASE_DIR
+  hadoop_conf_dir = DEFAULT_HADOOP_CONF_DIR
+  hadoop_logs_dir = DEFAULT_HADOOP_LOGS_DIR
+  hdfs_port = DEFAULT_HADOOP_HDFS_PORT
+  mapred_port = DEFAULT_HADOOP_MR_PORT
   
-  home = "/home/" + getpass.getuser()
-  base_conf_dir = home + "/common/hadoop/conf"
+  local_base_conf_dir = DEFAULT_HADOOP_LOCAL_CONF_DIR
     
   # Cluster state
   initialized = False
@@ -75,7 +85,7 @@ class HadoopCluster:
     
     # Copy base configuration files to tmp dir    
     self.conf_dir = tempfile.mkdtemp("","hadoop-","/tmp")
-    baseConfFiles = [ join(self.base_conf_dir,f) for f in listdir(self.base_conf_dir) ]
+    baseConfFiles = [ join(self.local_base_conf_dir,f) for f in listdir(self.local_base_conf_dir) ]
     for f in baseConfFiles:
       shutil.copy(f,self.conf_dir)    
     
@@ -113,10 +123,10 @@ class HadoopCluster:
     num_cores = host_attrs[u'architecture'][u'smt_size']
     main_mem = int(host_attrs[u'main_memory'][u'ram_size']) / (1024 * 1024 * num_cores)
     
-    self.__replace_in_file(join(self.conf_dir,core_conf_file), "fs.default.name", self.master.address + ":" + str(self.hdfs_port))
-    self.__replace_in_file(join(self.conf_dir,mr_conf_file), "mapred.job.tracker", self.master.address + ":" + str(self.mapred_port))
-    self.__replace_in_file(join(self.conf_dir,mr_conf_file), "mapred.tasktracker.map.tasks.maximum", str(num_cores))
-    self.__replace_in_file(join(self.conf_dir,mr_conf_file), "mapred.child.java.opts", "-Xmx" + str(main_mem) + "m")    
+    self.__replace_in_file(join(self.conf_dir,CORE_CONF_FILE), "fs.default.name", self.master.address + ":" + str(self.hdfs_port))
+    self.__replace_in_file(join(self.conf_dir,MR_CONF_FILE), "mapred.job.tracker", self.master.address + ":" + str(self.mapred_port))
+    self.__replace_in_file(join(self.conf_dir,MR_CONF_FILE), "mapred.tasktracker.map.tasks.maximum", str(num_cores))
+    self.__replace_in_file(join(self.conf_dir,MR_CONF_FILE), "mapred.child.java.opts", "-Xmx" + str(main_mem) + "m")    
   
   def __copy_conf(self, conf_dir):
     """Copy configuration files from given dir to remote dir in cluster hosts"""
@@ -136,7 +146,7 @@ class HadoopCluster:
     """Modify hadoop configuration"""
           
     # Copy conf files from master
-    remoteConfFiles = [ join(self.hadoop_conf_dir,f) for f in listdir(self.base_conf_dir) if f.endswith(".xml")]
+    remoteConfFiles = [ join(self.hadoop_conf_dir,f) for f in listdir(self.local_base_conf_dir) if f.endswith(".xml")]
     
     tmp_dir = "/tmp/mliroz_temp_hadoop/"
     if not os.path.exists(tmp_dir):
@@ -292,7 +302,7 @@ class HadoopCluster:
     """Executes the given command in the given node.
        If it is not provided, it is executed in the master"""
        
-    if not running:
+    if not self.running:
       logger.warn("The cluster was stopped. Starting it automatically")
       self.start()
     
@@ -421,6 +431,7 @@ class HadoopCluster:
     self.clean_logs()
     self.clean_data()
     
+    self.initialized = False
     
   # End HadoopCluster ########################################################## 
   
@@ -595,16 +606,19 @@ if __name__ == "__main__":
       logger.error("There is a hadoop cluster with that id. You must remove it before or chose another id")
       sys.exit(1)
     
-    hosts = __generate_hosts(args.create)
+    hosts = __generate_hosts(args.create[0])
     hc = HadoopCluster(hosts)
     
   elif args.delete:
 
     # Clean
     hc = deserialize_hcluster(hc_file_name)
-    hc.clean()
+    if hc.initialized:
+      logger.warn("The cluster needs to be cleaned before removed.")
+      hc.clean()
           
     # Remove hc dump file
+    logger.info("Removing hc dump file " + hc_file_name)
     os.remove(hc_file_name)
     
     sys.exit(0)
