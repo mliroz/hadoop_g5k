@@ -26,6 +26,7 @@ MR_CONF_FILE = "mapred-site.xml"
 DEFAULT_HADOOP_BASE_DIR = "/opt/base/hadoop"
 DEFAULT_HADOOP_CONF_DIR = DEFAULT_HADOOP_BASE_DIR + "/conf"
 DEFAULT_HADOOP_LOGS_DIR = "/opt/base/logs/hadoop"
+DEFAULT_HADOOP_TEMP_DIR = "/tmp/" + getpass.getuser() + "_hadoop/"
 
 DEFAULT_HADOOP_HDFS_PORT = 54310
 DEFAULT_HADOOP_MR_PORT = 54311
@@ -33,6 +34,78 @@ DEFAULT_HADOOP_MR_PORT = 54311
 DEFAULT_HADOOP_LOCAL_CONF_DIR = "/home/" + getpass.getuser() + "/common/hadoop/conf"
 
 class NotInitialized: pass
+
+class HadoopTopology:
+  
+  def __init__(self, hosts, topo_list = None):
+    """Creates a hadoop topology object assigning each host to the corresponding rack"""
+        
+    if topo_list:
+      if len(hosts) == len(topo_list):
+        self.topology = topo_list
+        return
+      else:
+        logger.warn("hosts and topology have not the same length.")
+      
+    logger.info("Discovering topology automatically")
+    self.topology = {}
+    for h in hosts:
+      nw_adapters = get_host_attributes(h)[u'network_adapters']
+      for nwa in nw_adapters:
+        if u'network_address' in nwa and nwa[u'network_address'] == h.address:
+          self.topology[h] = "/" + nwa[u'switch']
+          break
+
+
+  def get_rack(self, host):
+    """Returns the rack corresponding to a host"""
+
+    return self.topology[host]
+      
+          
+  def __str__(self):
+    return str(self.topology)
+
+
+  def create_files(self, dest):
+    """Creates the script (topo.sh) and data (topo.dat) files to obtain topology"""
+
+    # Create topology data file
+    topoDataFile = open(dest + "/topo.dat", "w")
+    for h, t in self.topology.iteritems():
+      topoDataFile.write(h.address + " "  + t + "\n")
+    topoDataFile.close()
+
+    # Create topology script file
+    script_str = """#!/bin/bash -e
+
+script_dir=$(readlink -f $(dirname $0))
+file_topo="$script_dir/topo.dat"
+
+if [ ! -f $file_topo ]
+then
+  touch $file_topo
+fi
+
+output=""
+
+for node in $@
+do
+  host_name=$(dig +short -x $node | rev | cut -c2- | rev)
+  rack=$(grep $host_name $file_topo | cut -d' ' -f2)
+  if [ -z $rack ]
+  then
+    rack="/default-rack"
+  fi
+  output="$output $rack"
+done
+
+echo $output
+"""
+
+    topoScriptFile = open(dest + "/topo.sh", "w")
+    topoScriptFile.write(script_str)
+    topoScriptFile.close()
 
 class HadoopCluster:
   
@@ -42,7 +115,7 @@ class HadoopCluster:
   running_dfs = False
   running_map_reduce = False
       
-  def __init__(self, hosts, topology = None, propsFile = None):
+  def __init__(self, hosts, topo_list = None, propsFile = None):
     """Creates a new Hadoop cluster with the given hosts and topology"""
     
     # Load cluster properties
@@ -50,6 +123,7 @@ class HadoopCluster:
       "hadoop_base_dir" : DEFAULT_HADOOP_BASE_DIR,
       "hadoop_conf_dir" : DEFAULT_HADOOP_CONF_DIR,
       "hadoop_logs_dir" : DEFAULT_HADOOP_LOGS_DIR,
+      "hadoop_temp_dir" : DEFAULT_HADOOP_TEMP_DIR,
       "hdfs_port" : str(DEFAULT_HADOOP_HDFS_PORT),
       "mapred_port" : str(DEFAULT_HADOOP_MR_PORT),
 
@@ -65,6 +139,7 @@ class HadoopCluster:
     self.hadoop_base_dir = config.get("cluster","hadoop_base_dir")
     self.hadoop_conf_dir = config.get("cluster","hadoop_conf_dir")
     self.hadoop_logs_dir = config.get("cluster","hadoop_logs_dir")
+    self.hadoop_temp_dir = config.get("cluster","hadoop_temp_dir")
     self.hdfs_port = config.getint("cluster","hdfs_port")
     self.mapred_port = config.getint("cluster","mapred_port")
     self.local_base_conf_dir = config.get("local","local_base_conf_dir")
@@ -74,15 +149,8 @@ class HadoopCluster:
     self.master = hosts[0]
         
     # Create topology
-    if topology == None:
-      self.topology = []
-      for h in hosts:
-        nw_adapters = get_host_attributes(h)[u'network_adapters']
-        for nwa in nw_adapters:
-          if u'network_address' in nwa and nwa[u'network_address'] == h.address:
-            self.topology.append("/" + nwa[u'switch'])
-            break
-       
+    self.topology = HadoopTopology(hosts, topo_list)
+          
     logger.info("Hadoop cluster created with master " + str(self.master) + ", hosts " + str(self.hosts) + " and topology " + str(self.topology))
     
   
@@ -114,11 +182,8 @@ class HadoopCluster:
       slavesFile.write(s.address + "\n")
     slavesFile.close()
     
-    # Create topology file
-    topoFile = open(self.conf_dir + "/topo.dat", "w")
-    for h, t in zip(self.hosts, self.topology):
-      topoFile.write(h.address + " "  + t + "\n")
-    topoFile.close()    
+    # Create topology files
+    self.topology.create_files(self.conf_dir)
     
     # Configure servers and host-dependant parameters
     self.__configure_servers()
@@ -144,6 +209,9 @@ class HadoopCluster:
     main_mem = int(host_attrs[u'main_memory'][u'ram_size']) / (1024 * 1024 * num_cores)
     
     self.__replace_in_file(join(self.conf_dir,CORE_CONF_FILE), "fs.default.name", self.master.address + ":" + str(self.hdfs_port))
+    self.__replace_in_file(join(self.conf_dir,CORE_CONF_FILE), "hadoop.tmp.dir", self.hadoop_temp_dir)
+    self.__replace_in_file(join(self.conf_dir,CORE_CONF_FILE), "topology.script.file.name", self.hadoop_conf_dir)
+    
     self.__replace_in_file(join(self.conf_dir,MR_CONF_FILE), "mapred.job.tracker", self.master.address + ":" + str(self.mapred_port))
     self.__replace_in_file(join(self.conf_dir,MR_CONF_FILE), "mapred.tasktracker.map.tasks.maximum", str(num_cores))
     self.__replace_in_file(join(self.conf_dir,MR_CONF_FILE), "mapred.child.java.opts", "-Xmx" + str(main_mem) + "m")    
@@ -465,7 +533,7 @@ class HadoopCluster:
       self.stop()
       restart = True
       
-    action = Remote("rm -rf /tmp/" + getpass.getuser() + "_hadoop hadoop-" + getpass.getuser() + "-*", self.hosts)
+    action = Remote("rm -rf " + self.hadoop_temp_dir + " /tmp/hadoop-" + getpass.getuser() + "-*", self.hosts)
     action.run()    
     
     if restart:
@@ -746,7 +814,9 @@ if __name__ == "__main__":
     logger.info("  Version: " + hc.get_version())
     logger.info("  Master: " + str(hc.master))
     logger.info("  Hosts: " + str(hc.hosts))
-    logger.info("  Topology: " + str(hc.topology))
+    logger.info("  Topology:")
+    for h in hc.hosts:
+      logger.info("    " + str(h) + " -> " + str(hc.topology.get_rack(h)))
     if hc.initialized:
       if hc.running:
         logger.info("The cluster is running")
