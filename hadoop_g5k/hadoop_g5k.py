@@ -2,10 +2,11 @@
 
 from argparse import ArgumentParser, RawTextHelpFormatter
 
-import sys, os, shutil, tempfile, getpass, pickle
+import sys, os, shutil, tempfile, getpass, pickle, ConfigParser, stat
 
 from execo import Host
 from execo.action import Put, TaktukPut, Get, Remote
+from execo.log import style
 from execo.process import Process, SshProcess
 from execo_engine import logger
 
@@ -13,8 +14,6 @@ from execo_g5k.api_utils import get_host_attributes
 
 from os import listdir
 from os.path import join
-
-import ConfigParser
 
 __user_login = getpass.getuser()
 
@@ -67,11 +66,11 @@ class HadoopTopology:
     return str(self.topology)
 
 
-  def create_files(self, dest):
+  def create_files(self, dest, data_file = "topo.dat", script_file = "topo.sh"):
     """Creates the script (topo.sh) and data (topo.dat) files to obtain topology"""
 
     # Create topology data file
-    topoDataFile = open(dest + "/topo.dat", "w")
+    topoDataFile = open(dest + "/" + data_file, "w")
     for h, t in self.topology.iteritems():
       topoDataFile.write(h.address + " "  + t + "\n")
     topoDataFile.close()
@@ -103,9 +102,12 @@ done
 echo $output
 """
 
-    topoScriptFile = open(dest + "/topo.sh", "w")
+    topoScriptFile = open(dest + "/" + script_file, "w")
     topoScriptFile.write(script_str)
     topoScriptFile.close()
+    
+    st = os.stat(dest + "/" + script_file)
+    os.chmod(dest + "/" + script_file, st.st_mode | stat.S_IEXEC)    
 
 class HadoopCluster:
   
@@ -170,7 +172,7 @@ class HadoopCluster:
     self.conf_dir = tempfile.mkdtemp("","hadoop-","/tmp")
     baseConfFiles = [ join(self.local_base_conf_dir,f) for f in listdir(self.local_base_conf_dir) ]
     for f in baseConfFiles:
-      shutil.copy(f,self.conf_dir)    
+      shutil.copy(f,self.conf_dir)
     
     # Create master and slaves configuration files
     masterFile = open(self.conf_dir + "/masters", "w")
@@ -210,7 +212,7 @@ class HadoopCluster:
     
     self.__replace_in_file(join(self.conf_dir,CORE_CONF_FILE), "fs.default.name", self.master.address + ":" + str(self.hdfs_port))
     self.__replace_in_file(join(self.conf_dir,CORE_CONF_FILE), "hadoop.tmp.dir", self.hadoop_temp_dir)
-    self.__replace_in_file(join(self.conf_dir,CORE_CONF_FILE), "topology.script.file.name", self.hadoop_conf_dir)
+    self.__replace_in_file(join(self.conf_dir,CORE_CONF_FILE), "topology.script.file.name", self.hadoop_conf_dir + "/topo.sh")
     
     self.__replace_in_file(join(self.conf_dir,MR_CONF_FILE), "mapred.job.tracker", self.master.address + ":" + str(self.mapred_port))
     self.__replace_in_file(join(self.conf_dir,MR_CONF_FILE), "mapred.tasktracker.map.tasks.maximum", str(num_cores))
@@ -407,7 +409,7 @@ class HadoopCluster:
       self.running_map_reduce = False      
       
   
-  def execute(self, command, node = None, should_be_running = True):
+  def execute(self, command, node = None, should_be_running = True, verbose = True):
     """Executes the given command in the given node.
        If it is not provided, it is executed in the master"""
        
@@ -424,16 +426,36 @@ class HadoopCluster:
     
     logger.info("Executing {" + self.hadoop_base_dir + "/bin/hadoop " + command + "} in " + str(node))
     
-    proc = SshProcess(self.hadoop_base_dir + "/bin/hadoop " + command, node)
-    proc.stdout_handlers.append(sys.stdout) 
-    proc.stderr_handlers.append(sys.stderr) 
+    proc = SshProcess(self.hadoop_base_dir + "/bin/hadoop " + command, node)  
+    
+    if verbose:
+      
+      class ColorDecorator(object):
+
+        defaultColor = '\033[0;0m'
+
+        def __init__(self, component, color):
+          self.component = component
+          self.color = color
+
+        def __getattr__(self, attr):
+          if attr == 'write' and self.component.isatty():
+            return lambda x: self.component.write(self.color + x + self.defaultColor)
+          else:
+            return getattr(self.component, attr)
+
+      redColor = '\033[01;31m'
+
+      proc.stdout_handlers.append(sys.stdout) 
+      proc.stderr_handlers.append(ColorDecorator(sys.stderr, redColor)) 
+      
     proc.start()   
     proc.wait()
     
-  def execute_jar(self, jar_path, params = [], lib_paths = [], node = None):
+  def execute_jar(self, jar_path, params = [], lib_paths = [], node = None, verbose = True):
     """Executes the mapreduce job included in the given jar_path. A list of libraries
        to be copied along with the main jar file and a set of params can be in"""
-       
+              
     if not self.initialized:
       logger.error("The cluster should be initialized")
       return       
@@ -478,7 +500,7 @@ class HadoopCluster:
     for p in params:
       params_str += " " + p
           
-    self.execute("jar " + jar_file + libs_param + params_str, node)
+    self.execute("jar " + jar_file + libs_param + params_str, node, verbose = verbose)
 
     
   def copy_history(self, dest):
@@ -664,6 +686,18 @@ if __name__ == "__main__":
                 nargs=1,
                 action="store",
                 help="File containing the properties to be used. Applies only to --create")                                                
+                
+  verbose_group = parser.add_mutually_exclusive_group()
+  
+  verbose_group.add_argument("-v", "--verbose",
+                dest="verbose",
+                action="store_true",
+                help="Run in verbose mode")          
+                
+  verbose_group.add_argument("-q", "--quiet",
+                dest="quiet",
+                action="store_true",
+                help="Run in quiet mode")
   
   object_group = parser.add_mutually_exclusive_group()
   
@@ -702,7 +736,7 @@ if __name__ == "__main__":
   parser.add_argument("--jarjob",
                 action="store",
                 nargs="+",
-                metavar=("JAR_PATH","PARAM"),
+                metavar=("LOCAL_JAR_PATH","PARAM"),
                 help="Copy the jar file and execute it with the specified parameters")
                 
   parser.add_argument("--copyhistory",
@@ -726,8 +760,6 @@ if __name__ == "__main__":
                 help="Show this help message and exit")
   
   args = parser.parse_args()
-
-  print args
   
   # Get id
   if args.id:
@@ -743,10 +775,17 @@ if __name__ == "__main__":
       
   logger.info("Using id = " + str(id))
   
+  verbose = True
+  if args.quiet:
+    verbose = False
+  
   # Check node specification
+  node_host = None
   if args.node:
     if not (args.execute or args.jarjob):
       logger.warn("--node only applies to --execute or --jarjob")
+    else:
+      node_host = Host(args.node[0])
   
   # Create or load object
   hc_file_name = os.path.join(hg5k_tmp_dir,str(id))
@@ -788,33 +827,33 @@ if __name__ == "__main__":
     hc.start_and_wait()
   
   if args.execute:
-    if args.node:
-      hc.execute(args.execute[0], args.node[0])
+    if node_host:
+      hc.execute(args.execute[0], node_host, verbose = verbose)
     else:
-      hc.execute(args.execute[0])
+      hc.execute(args.execute[0], verbose = verbose)
   
   if args.jarjob:
     if len(args.jarjob) > 1:
-      if args.node:
-        hc.execute_jar(args.jarjob[0], args.jarjob[1:], [], args.node[0])
+      if node_host:
+        hc.execute_jar(args.jarjob[0], args.jarjob[1:], node = node_host, verbose = verbose)
       else:
-        hc.execute_jar(args.jarjob[0], args.jarjob[1:])
+        hc.execute_jar(args.jarjob[0], args.jarjob[1:], verbose = verbose)
     else:
-      if args.node:
-        hc.execute_jar(args.jarjob[0], [], [], args.node[0])
+      if node_host:
+        hc.execute_jar(args.jarjob[0], node = node_host, verbose = verbose)
       else:
-        hc.execute_jar(args.jarjob[0])
+        hc.execute_jar(args.jarjob[0], verbose = verbose)
       
   if args.copyhistory:
     hc.copy_history(args.copyhistory[0])
       
   if args.state:
     logger.info("---------------------------------------------------------")
-    logger.info("Hadoop Cluster with ID " + str(id))
-    logger.info("  Version: " + hc.get_version())
-    logger.info("  Master: " + str(hc.master))
-    logger.info("  Hosts: " + str(hc.hosts))
-    logger.info("  Topology:")
+    logger.info(style.user2("Hadoop Cluster with ID " + str(id)))
+    logger.info(style.user1("  Version: ") + hc.get_version())
+    logger.info(style.user1("  Master: ") + str(hc.master))
+    logger.info(style.user1("  Hosts: ") + str(hc.hosts))
+    logger.info(style.user1("  Topology: "))
     for h in hc.hosts:
       logger.info("    " + str(h) + " -> " + str(hc.topology.get_rack(h)))
     if hc.initialized:
