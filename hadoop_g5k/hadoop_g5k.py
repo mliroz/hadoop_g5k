@@ -2,7 +2,7 @@
 
 from argparse import ArgumentParser, RawTextHelpFormatter
 
-import sys, os, shutil, tempfile, getpass, pickle, ConfigParser, stat
+import sys, os, shutil, tempfile, getpass, pickle, ConfigParser, stat, re
 
 from execo import Host
 from execo.action import Put, TaktukPut, Get, Remote
@@ -210,13 +210,13 @@ class HadoopCluster:
     num_cores = host_attrs[u'architecture'][u'smt_size']
     main_mem = int(host_attrs[u'main_memory'][u'ram_size']) / (1024 * 1024 * num_cores)
     
-    self.__replace_in_file(join(self.conf_dir,CORE_CONF_FILE), "fs.default.name", self.master.address + ":" + str(self.hdfs_port))
-    self.__replace_in_file(join(self.conf_dir,CORE_CONF_FILE), "hadoop.tmp.dir", self.hadoop_temp_dir)
-    self.__replace_in_file(join(self.conf_dir,CORE_CONF_FILE), "topology.script.file.name", self.hadoop_conf_dir + "/topo.sh")
+    self.__replace_in_file(join(self.conf_dir,CORE_CONF_FILE), "fs.default.name", self.master.address + ":" + str(self.hdfs_port), True)
+    self.__replace_in_file(join(self.conf_dir,CORE_CONF_FILE), "hadoop.tmp.dir", self.hadoop_temp_dir, True)
+    self.__replace_in_file(join(self.conf_dir,CORE_CONF_FILE), "topology.script.file.name", self.hadoop_conf_dir + "/topo.sh", True)
     
-    self.__replace_in_file(join(self.conf_dir,MR_CONF_FILE), "mapred.job.tracker", self.master.address + ":" + str(self.mapred_port))
-    self.__replace_in_file(join(self.conf_dir,MR_CONF_FILE), "mapred.tasktracker.map.tasks.maximum", str(num_cores))
-    self.__replace_in_file(join(self.conf_dir,MR_CONF_FILE), "mapred.child.java.opts", "-Xmx" + str(main_mem) + "m")    
+    self.__replace_in_file(join(self.conf_dir,MR_CONF_FILE), "mapred.job.tracker", self.master.address + ":" + str(self.mapred_port), True)
+    self.__replace_in_file(join(self.conf_dir,MR_CONF_FILE), "mapred.tasktracker.map.tasks.maximum", str(num_cores), True)
+    self.__replace_in_file(join(self.conf_dir,MR_CONF_FILE), "mapred.child.java.opts", "-Xmx" + str(main_mem) + "m", True)
   
   def __copy_conf(self, conf_dir):
     """Copy configuration files from given dir to remote dir in cluster hosts"""
@@ -248,27 +248,62 @@ class HadoopCluster:
     # Do replacements in temp file
     tempConfFiles = [ join(tmp_dir,f) for f in listdir(tmp_dir)]
     
-    for (name, value) in params:
+    for name, value in params.iteritems():
       for f in tempConfFiles:
         if self.__replace_in_file(f, name, value):
           break
+      else:
+        # Property not found - provisionally add it in MR_CONF_FILE
+        f = join(tmp_dir,MR_CONF_FILE)
+        self.__replace_in_file(f, name, value, True)
+        
           
     # Copy back the files to all hosts
     self.__copy_conf(tmp_dir)
       
       
-  def __replace_in_file(self, f, name, value):
+  def __replace_in_file(self, f, name, value, create_if_absent = False):
     """Assign value to variable name in file f"""
         
-    command = "awk 'BEGIN { RS=\"</property>\"; ORS=\"</property>\"} "
-    command += "{if (match($0,/<name>" + name  + "<\/name>/)) {sub(/<value>[^<]*<\/value>/,\"<value>" + value + "</value>\");print} else print}' " + f
+    changed = False
     
-    proc = Process(command)
-    proc.run()
+    (_,temp_file) = tempfile.mkstemp("","hadoopf-","/tmp")
     
-    out = open(f, "w")
-    out.write(proc.stdout[:proc.stdout.rfind('\n')] + "\n")
-    out.close()    
+    inf = open(f)
+    outf = open(temp_file,"w")
+    line = inf.readline()
+    while line != "":
+      if "<name>" + name + "</name>" in line:
+        if "<value>" in line:
+          outf.write(self.__replace_line(line, value))
+          changed = True
+        else:
+          outf.write(line)
+          line = inf.readline()
+          if line != "":
+            outf.write(self.__replace_line(line, value))
+            changed = True
+          else:
+            logger.error("Configuration file " + f + " is not correctly formatted")
+      else:
+        if "</configuration>" in line and create_if_absent and not changed:
+          outf.write("  <property><name>" + name + "</name><value>" + value + "</vaue></property>\n");
+          outf.write(line)
+          changed = True
+        else:
+          outf.write(line)
+      line = inf.readline()
+    inf.close()            
+    outf.close()
+    
+    if changed:
+      shutil.copyfile(temp_file, f)
+    os.remove(temp_file)
+      
+    return changed
+        
+  def __replace_line(self, line, value):
+    return re.sub(r'(.*)<value>[^<]*</value>(.*)', r'\g<1><value>' + value + r'</value>\g<2>', line)
     
     
   def format_dfs(self):
@@ -743,7 +778,13 @@ if __name__ == "__main__":
                   action="store",
                   nargs=1,
                   metavar="LOCAL_PATH",                
-                  help="Copies history to the specified path")                
+                  help="Copies history to the specified path")
+                  
+  parser.add_argument("--changeconf",
+                  action="store",
+                  nargs="+",
+                  metavar="NAME=VALUE",                
+                  help="Change given configuration variables")                  
                 
   parser.add_argument("--clean",
                 dest="clean",
@@ -819,9 +860,17 @@ if __name__ == "__main__":
     # Deserialize
     hc = deserialize_hcluster(hc_file_name)
     
-  # Execute options
+  # Execute options  
   if args.initialize:
     hc.initialize()
+    
+  if args.changeconf:
+    params = {}
+    for str in args.changeconf:
+      parts = str.split("=")
+      params[parts[0]] = parts[1]
+      
+    hc.change_conf(params)
   
   if args.start:
     hc.start_and_wait()
