@@ -3,7 +3,7 @@ import threading
 
 from abc import ABCMeta, abstractmethod
 
-from execo.action import Put
+from execo.action import Put, Remote, TaktukRemote
 from execo_engine import logger
 from hadoop_g5k import HadoopCluster
 
@@ -66,21 +66,26 @@ class StaticDataset(Dataset):
         self.local_dir = local_dir
         
     
-    def deploy(self, hc, dest, uncompress_function = None):
+    def deploy(self, hc, dest, pre_processing_function = None):
         """Deploy the dataset in the given dfs folder by copying it from the
         local folder.
         
         Args:
           hc (HadoopCluster): The hadoop cluster where to deploy the dataset.
           dest (str): The dfs destination folder.
-          uncompress_function (func): An uncompress function to be applied after
-            transfers and before uploading to dfs
+          pre_processing_function (func): An function to be applied after
+            transfers and before uploading to dfs (usually decompression).
         """
         
         dataset_files = [os.path.join(self.local_dir,f) for f in os.listdir(self.local_dir)]
+        hosts = hc.hosts
         
-        #tmp_dir = os.path.join("/tmp",os.path.basename(self.local_dir))
-        tmp_dir = "/tmp"
+        # Define and create temp dir
+        tmp_dir = "/tmp" + dest
+        actionRemove = TaktukRemote("rm -rf " + tmp_dir, hosts)
+        actionRemove.run()
+        actionCreate = TaktukRemote("mkdir -p " + tmp_dir, hosts)
+        actionCreate.run()
         
         # Generate list of files to copy
         if self.desired_size:
@@ -100,7 +105,6 @@ class StaticDataset(Dataset):
             all_files_to_copy = dataset_files
         
         # Assign files to hosts
-        hosts = hc.hosts
         files_per_host = [[]] * len(hosts)
         for idx in range(0,len(hosts)):
             files_per_host[idx] = all_files_to_copy[idx::len(hosts)]
@@ -115,10 +119,10 @@ class StaticDataset(Dataset):
             
             for f in files_to_copy:
                 src_file = os.path.join(tmp_dir, os.path.basename(f))
-                if uncompress_function:
-                    src_file = uncompress_function(src_file, host)
+                if pre_processing_function:
+                    src_file = pre_processing_function(src_file, host)
             
-                hc.execute("fs -put " + src_file + " " + os.path.join(dest,os.path.basename(f)), host, True, False)
+                hc.execute("fs -put " + src_file + " " + os.path.join(dest,src_file), host, True, False)
             
         threads = []
         for idx, h in enumerate(hosts):
@@ -135,9 +139,22 @@ class StaticDataset(Dataset):
         
 
 class DynamicDataset(Dataset):
+    """This class manages a dynamic dataset, i.e., a dataset that is created
+    dynamically by a hadoop job.
+    """    
     
-    def __init__(self, jar_job, desired_size):
-        """Documentation"""
+    def __init__(self, job, desired_size):
+        """Create a dynamic dataset with the desired associated with the given
+        hadoop job.
+        
+        Args:
+          job (HadooopJarJob): The job that generates the dataset.
+          desired_size (int, optional): The size of the data to be copied. If
+            indicated only the first files of the dataset up to the given size
+            are copied, if not, the whole dataset is transferred.
+        """
+                
+        self.job = job
         
     def deploy(self, hc, dest):
         """Deploy the dataset in the given dfs folder by generating it
@@ -147,5 +164,7 @@ class DynamicDataset(Dataset):
           hc (HadoopCluster): The hadoop cluster where to deploy the dataset.
           dest (str): The dfs destination folder.
         """
+        
+        hc.execute_jar(self.job)
         
         deployments[hc] = dest
