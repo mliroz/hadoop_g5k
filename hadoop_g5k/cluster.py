@@ -653,8 +653,9 @@ class HadoopCluster(object):
 
         if not node:
             node = self.master
-
-        logger.info("Executing {" + self.hadoop_base_dir + "/bin/hadoop " + 
+            
+        if verbose:
+            logger.info("Executing {" + self.hadoop_base_dir + "/bin/hadoop " + 
                     command + "} in " + str(node))
 
         proc = SshProcess(self.hadoop_base_dir + "/bin/hadoop " + command, node)
@@ -668,6 +669,9 @@ class HadoopCluster(object):
 
         proc.start()
         proc.wait()
+        
+        return (proc.stdout, proc.stderr)
+
 
     def execute_jar(self, job, node = None, verbose = True):
         """Execute the given mapreduce job included in the given jar.
@@ -716,7 +720,15 @@ class HadoopCluster(object):
         proc.wait()
         
         # Get job info
+        job.stdout = proc.stdout
+        job.stderr = proc.stderr
         
+        for line in job.stdout.splitlines():
+            if "Running job" in line:
+                match = re.match('.*Running job: (.*)',line)
+                job.job_id = match.group(1)
+
+        return (proc.stdout, proc.stderr)
 
 
     def copy_history(self, dest):
