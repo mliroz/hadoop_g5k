@@ -242,11 +242,21 @@ if __name__ == "__main__":
                         dest="clean",
                         action="store_true",
                         help="Remove hadoop logs and clean the dfs")
+                        
+    queries = parser.add_argument_group(style.host("Hadoop queries"), 
+        "Set of queries that can be executed in hadoop.")                         
 
-    actions.add_argument("--state",
-                        dest="state",
-                        action="store_true",
-                        help="Show the cluster state")
+    queries.add_argument("--state",
+                        action="store",
+                        nargs=1,
+                        metavar="general | files | dfs | dfsblocks | mrjobs",
+                        help="Show the cluster state. The output depends on optional argument:\n" + 
+                             "  general    Show general cluster state.\n" +
+                             "  files      Show dfs file hierarchy.\n" +
+                             "  dfs        Show filesystem state.\n" +
+                             "  dfsblocks  Show dfs blocks information.\n" +
+                             "  mrjobs     Show mapreduce state.\n")
+                                           
 
     args = parser.parse_args()
 
@@ -379,28 +389,60 @@ if __name__ == "__main__":
     if args.copyhistory:
         hc.copy_history(args.copyhistory[0])
 
-    if args.state:
-        logger.info("---------------------------------------------------------")
-        logger.info(style.user2("Hadoop Cluster with ID " + str(id)))
-        logger.info(style.user1("    Version: ") + hc.get_version())
-        logger.info(style.user1("    Master: ") + str(hc.master))
-        logger.info(style.user1("    Hosts: ") + str(hc.hosts))
-        logger.info(style.user1("    Topology: "))
-        for h in hc.hosts:
-            logger.info("        " + str(h) + " -> " + str(hc.topology.get_rack(h)))
-        if hc.initialized:
-            if hc.running:
-                logger.info("The cluster is running")
-            else:
-                logger.info("The cluster is stopped")
-        else:
-            logger.info("The cluster is not initialized")
-        logger.info("---------------------------------------------------------")
-
     if args.stop:
         hc.stop()
 
     if args.clean:
         hc.clean()
+    
+    if args.state:
+        if args.state[0] == "general":
+            
+            logger.info("---------------------------------------------------------")
+            logger.info(style.user2("Hadoop Cluster with ID " + str(id)))
+            logger.info(style.user1("    Version: ") + hc.get_version())
+            logger.info(style.user1("    Master: ") + str(hc.master))
+            logger.info(style.user1("    Hosts: ") + str(hc.hosts))
+            logger.info(style.user1("    Topology: "))
+            for h in hc.hosts:
+                logger.info("        " + str(h) + " -> " + str(hc.topology.get_rack(h)))
+            if hc.initialized:
+                if hc.running:
+                    logger.info("The cluster is " + style.user3("running"))
+                else:
+                    logger.info("The cluster is " + style.user3("stopped"))
+            else:
+                logger.info("The cluster is not " + style.user3("initialized"))
+            logger.info("---------------------------------------------------------")
+        
+        elif args.state[0] == "files":                      
+            (stdout, stderr) = hc.execute("fs -lsr /", verbose = False)
+            print ""            
+            for line in stdout.splitlines():
+                if not "WARN fs.FileSystem" in line:
+                    print line
+            print ""
+            
+            (stdout, stderr) = hc.execute("fs -dus /", verbose = False)            
+            pos = stdout.rfind("\t")
+            print "Total Size = " + stdout[pos + 1:]            
+                    
+        elif args.state[0] == "dfs":
+            (stdout, stderr) = hc.execute("dfsadmin -report", verbose = False)
+            print ""
+            print stdout
+            
+        elif args.state[0] == "dfsblocks":
+            (stdout, stderr) = hc.execute("fsck -blocks", verbose = False)
+            print ""
+            print stdout            
+            print ""
+                    
+        elif args.state[0] == "mrjobs":
+            (stdout, stderr) = hc.execute("job -list all", verbose = False)
+            print ""            
+            print stdout
+            print ""
+        
 
     serialize_hcluster(hc_file_name, hc)
