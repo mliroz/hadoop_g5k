@@ -3,6 +3,7 @@
 import getpass
 import os
 import pickle
+import sys
 
 from hadoop_g5k import HadoopCluster, HadoopJarJob
 
@@ -127,25 +128,26 @@ if __name__ == "__main__":
                             formatter_class=RawTextHelpFormatter,
                             add_help=False)
 
-    parser.add_argument("--id",
+    actions = parser.add_argument_group(style.host("General options"), 
+                        "Options to be used generally with hadoop actions")
+                        
+    actions.add_argument("-h", "--help",
+                        action="help",
+                        help="Show this help message and exit")                        
+
+    actions.add_argument("--id",
                         action="store",
                         nargs=1,
                         metavar="ID",
                         help="The identifier of the cluster. If not indicated, last used cluster will be used (if any).")
 
-    parser.add_argument("--node",
+    actions.add_argument("--node",
                         action="store",
                         nargs=1,
                         metavar="NODE",
                         help="Node where the action will be executed. Applies only to --execute and --jarjob")
 
-    parser.add_argument("--properties",
-                        dest="properties",
-                        nargs=1,
-                        action="store",
-                        help="File containing the properties to be used. Applies only to --create")
-
-    verbose_group = parser.add_mutually_exclusive_group()
+    verbose_group = actions.add_mutually_exclusive_group()
 
     verbose_group.add_argument("-v", "--verbose",
                                dest="verbose",
@@ -157,83 +159,94 @@ if __name__ == "__main__":
                                action="store_true",
                                help="Run in quiet mode")
 
-    object_group = parser.add_mutually_exclusive_group()
+    object_group = parser.add_argument_group(style.host("Object management options"), 
+                        "Options to be used generally with hadoop actions")
 
-    object_group.add_argument("--create",
+    object_mutex_group = object_group.add_mutually_exclusive_group()
+
+    object_mutex_group.add_argument("--create",
                               metavar="MACHINELIST",
                               nargs=1,
                               action="store",
                               help="Create the cluster object with the nodes in MACHINELIST file")
 
-    object_group.add_argument("--delete",
+    object_mutex_group.add_argument("--delete",
                               dest="delete",
                               action="store_true",
                               help="Remove all files used by the cluster")
+                              
+    object_group.add_argument("--properties",
+                        dest="properties",
+                        nargs=1,
+                        action="store",
+                        help="File containing the properties to be used. Applies only to --create")
+                              
+                              
+    actions = parser.add_argument_group(style.host("Hadoop actions"), 
+        "Actions to execute in the hadoop cluster. Several options can be indicated at the same time.\n" +
+        "The order of execution is fixed no matter the order used in the arguments: it follows the order\n" +
+        "of the options.") 
 
-    parser.add_argument("--initialize",
+    actions.add_argument("--initialize",
                         dest="initialize",
                         action="store_true",
                         help="Initialize cluster: Copy configuration and format dfs")
-
-    parser.add_argument("--start",
-                        dest="start",
-                        action="store_true",
-                        help="Start the namenode and jobtracker")
-
-    parser.add_argument("--stop",
-                        dest="stop",
-                        action="store_true",
-                        help="Stop the namenode and jobtracker")
-
-    parser.add_argument("--execute",
-                        action="store",
-                        nargs=1,
-                        metavar="COMMAND",
-                        help="Execute a hadoop command")
-
-    parser.add_argument("--jarjob",
+                        
+    actions.add_argument("--changeconf",
                         action="store",
                         nargs="+",
-                        metavar=("LOCAL_JAR_PATH","PARAM"),
-                        help="Copy the jar file and execute it with the specified parameters")
-
-    parser.add_argument("--copyhistory",
-                        action="store",
-                        nargs=1,
-                        metavar="LOCAL_PATH",
-                        help="Copy history to the specified path")
+                        metavar="NAME=VALUE",
+                        help="Change given configuration variables")          
                         
-    parser.add_argument("--putindfs",
+    actions.add_argument("--start",
+                        dest="start",
+                        action="store_true",
+                        help="Start the namenode and jobtracker")                        
+                        
+    actions.add_argument("--putindfs",
                         action="store",
                         nargs=2,
                         metavar=("LOCAL_PATH","DFS_PATH"),
                         help="Copy a local path into the remote path in dfs")
                         
-    parser.add_argument("--getfromdfs",
+    actions.add_argument("--getfromdfs",
                         action="store",
                         nargs=2,
                         metavar=("DFS_PATH","LOCAL_PATH"),
-                        help="Copy a remote path in dfs into the specified local path")                        
+                        help="Copy a remote path in dfs into the specified local path")         
 
-    parser.add_argument("--changeconf",
+    actions.add_argument("--execute",
+                        action="store",
+                        nargs=1,
+                        metavar="COMMAND",
+                        help="Execute a hadoop command")
+
+    actions.add_argument("--jarjob",
                         action="store",
                         nargs="+",
-                        metavar="NAME=VALUE",
-                        help="Change given configuration variables")
+                        metavar=("LOCAL_JAR_PATH","PARAM"),
+                        help="Copy the jar file and execute it with the specified parameters")
 
-    parser.add_argument("--clean",
+    actions.add_argument("--copyhistory",
+                        action="store",
+                        nargs=1,
+                        metavar="LOCAL_PATH",
+                        help="Copy history to the specified path")                                      
+
+    actions.add_argument("--stop",
+                        dest="stop",
+                        action="store_true",
+                        help="Stop the namenode and jobtracker")
+
+    actions.add_argument("--clean",
                         dest="clean",
                         action="store_true",
                         help="Remove hadoop logs and clean the dfs")
 
-    parser.add_argument("--state",
+    actions.add_argument("--state",
                         dest="state",
                         action="store_true",
                         help="Show the cluster state")
-
-    parser.add_argument("-h", "--help",
-                        action="help",
-                        help="Show this help message and exit")
 
     args = parser.parse_args()
 
