@@ -95,8 +95,8 @@ class StaticDataset(Dataset):
             while self.real_size < self.desired_size:
                 if dataset_files:
                     all_files_to_copy.append(dataset_files[0])
+                    self.real_size += os.path.getsize(dataset_files[0])                    
                     del dataset_files[0]
-                    self.real_size += os.path.getsize(dataset_files[0])
                 else:
                     logger.warn("Dataset files do not fill up to desired size (real size = " + str(self.real_size) + ")")
                     break
