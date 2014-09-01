@@ -129,7 +129,7 @@ if __name__ == "__main__":
                             add_help=False)
 
     actions = parser.add_argument_group(style.host("General options"), 
-                        "Options to be used generally with hadoop actions")
+                        "Options to be used generally with hadoop action.s")
                         
     actions.add_argument("-h", "--help",
                         action="help",
@@ -160,7 +160,7 @@ if __name__ == "__main__":
                                help="Run in quiet mode")
 
     object_group = parser.add_argument_group(style.host("Object management options"), 
-                        "Options to be used generally with hadoop actions")
+                        "Options to create and destory hadoop cluster objects.")
 
     object_mutex_group = object_group.add_mutually_exclusive_group()
 
@@ -179,7 +179,7 @@ if __name__ == "__main__":
                         dest="properties",
                         nargs=1,
                         action="store",
-                        help="File containing the properties to be used. Applies only to --create")
+                        help="File containing the properties to be used (INI file). Applies only to --create")
                               
                               
     actions = parser.add_argument_group(style.host("Hadoop actions"), 
@@ -248,10 +248,11 @@ if __name__ == "__main__":
 
     queries.add_argument("--state",
                         action="store",
-                        nargs=1,
+                        nargs="?",
+                        const="general",
                         metavar="general | files | dfs | dfsblocks | mrjobs",
                         help="Show the cluster state. The output depends on optional argument:\n" + 
-                             "  general    Show general cluster state.\n" +
+                             "  general    Show general cluster state (default option).\n" +
                              "  files      Show dfs file hierarchy.\n" +
                              "  dfs        Show filesystem state.\n" +
                              "  dfsblocks  Show dfs blocks information.\n" +
@@ -396,7 +397,7 @@ if __name__ == "__main__":
         hc.clean()
     
     if args.state:
-        if args.state[0] == "general":
+        if args.state == "general":
             
             logger.info("---------------------------------------------------------")
             logger.info(style.user2("Hadoop Cluster with ID " + str(id)))
@@ -415,7 +416,7 @@ if __name__ == "__main__":
                 logger.info("The cluster is not " + style.user3("initialized"))
             logger.info("---------------------------------------------------------")
         
-        elif args.state[0] == "files":                      
+        elif args.state == "files":                      
             (stdout, stderr) = hc.execute("fs -lsr /", verbose = False)
             print ""            
             for line in stdout.splitlines():
@@ -427,18 +428,18 @@ if __name__ == "__main__":
             pos = stdout.rfind("\t")
             print "Total Size = " + stdout[pos + 1:]            
                     
-        elif args.state[0] == "dfs":
+        elif args.state == "dfs":
             (stdout, stderr) = hc.execute("dfsadmin -report", verbose = False)
             print ""
             print stdout
             
-        elif args.state[0] == "dfsblocks":
+        elif args.state == "dfsblocks":
             (stdout, stderr) = hc.execute("fsck -blocks", verbose = False)
             print ""
             print stdout            
             print ""
                     
-        elif args.state[0] == "mrjobs":
+        elif args.state == "mrjobs":
             (stdout, stderr) = hc.execute("job -list all", verbose = False)
             print ""            
             print stdout
