@@ -274,6 +274,7 @@ class HadoopCluster(object):
         if self.initialized:
             if self.running:
                 self.stop()
+            self.clean()
         else:
             self.__force_clean()
 
@@ -841,7 +842,7 @@ class HadoopCluster(object):
                 for id in ids_to_kill:
                     ids_to_kill_str += " " + id
                     
-                proc = SshProcess("kill -9" + ids_to_kill_str, self.master)
+                proc = SshProcess("kill -9" + ids_to_kill_str, h)
                 proc.run()
         
         if force_kill:
