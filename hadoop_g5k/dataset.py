@@ -110,6 +110,7 @@ class StaticDataset(Dataset):
             files_per_host[idx] = all_files_to_copy[idx::len(hosts)]
             
         # Create threads and launch them
+        logger.info("Deploying dataset in parallel into " + str(len(hosts)) + " hosts")
         if not hc.running:
             hc.start()
         
@@ -122,7 +123,7 @@ class StaticDataset(Dataset):
                 if pre_processing_function:
                     src_file = pre_processing_function(src_file, host)
             
-                hc.execute("fs -put " + src_file + " " + os.path.join(dest,src_file), host, True, False)
+                hc.execute("fs -put " + src_file + " " + os.path.join(dest, os.path.basename(src_file)), host, True, False)
             
         threads = []
         for idx, h in enumerate(hosts):
