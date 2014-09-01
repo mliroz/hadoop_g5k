@@ -39,7 +39,6 @@ class HadoopEngine(Engine):
         self.options_parser.add_option("-o", dest="outofchart",
                     help="Run the engine outside days",
                     action="store_true")
-        #self.n_nodes = 2
         self.options_parser.add_option("-w", dest="walltime",
                     help="walltime for the reservation",
                     type="string",
@@ -93,17 +92,16 @@ class HadoopEngine(Engine):
                     self.hc = HadoopCluster(self.hosts)
                 ## SETUP FINISHED
 
-                # Getting the next combination
+                # Getting the next combination (which requires a dataset deployment)
                 comb = self.sweeper.get_next()
                 self.comb = comb
                 self.prepare_dataset(comb)
                 self.xp(comb)
-                # subloop over the combinations that have the same size
+                
+                # subloop over the combinations that use the same dataset
                 while True:
-                    #newcomb = self.sweeper.get_next(lambda r:
-                    #        filter(lambda subcomb: subcomb['size'] == comb['size'], r))
                     newcomb = self.sweeper.get_next(lambda r:
-                            filter(self.uses_same_combination, r))
+                            filter(self._uses_same_ds, r))
                     if newcomb:
                         try:
                             self.xp(newcomb)
@@ -124,12 +122,22 @@ class HadoopEngine(Engine):
                 else:
                     logger.info('Keeping job alive for debugging')
                     
-            #if self.hc.initialized:
-            #    self.hc.clean()
+            if self.hc:
+                if hc.initialized:
+                    self.hc.clean()
+                    
 
-    def uses_same_combination(self, newcomb):
+    def _uses_same_ds(self, candidate_comb):
+        """Determine if the candidate combination uses the same dataset as the
+        current one.
+        
+        Args:
+          candidate_comb (dict): The combination candidate to be selected as the
+            new combination.
+        """
+        
         for var in self.ds_parameters.keys():
-          if newcomb[var] != self.comb[var]:
+          if candidate_comb[var] != self.comb[var]:
             return False
         return True
       
@@ -178,7 +186,7 @@ class HadoopEngine(Engine):
                                                                  minutes=1)))
         startdate, n_nodes = self._get_nodes(starttime, endtime)
         while not n_nodes:
-            logger.info('No enough nodes found between %s and %s, ' + \
+            logger.info('Not enough nodes found between %s and %s, ' + \
                         'increasing time window',
                         format_date(starttime), format_date(endtime))
             starttime = endtime
@@ -221,6 +229,17 @@ class HadoopEngine(Engine):
     
     
     def deploy_nodes(self, min_deployed_hosts = 1, max_tries = 3):
+        """Deploy nodes in the cluster. If the number of deployed nodes is less
+        thatn the specified min, try again.
+        
+        Args:
+          min_deployed_hosts (int, optional): minimum number of nodes to be
+            deployed (defualt: 1).
+          max_tries (int, optional): maximum number of tries to reach the
+            minimum number of nodes (default: 3).
+        """
+        
+        
         logger.info("Deploying " + str(len(self.hosts)) + " nodes")
         
         def correct_deployment(deployed, undeployed):
@@ -255,7 +274,11 @@ class HadoopEngine(Engine):
         
       
     def deploy_ds(self, comb):
-        """Documentation"""
+        """Deploy the dataset corresponding to the given combination.
+        
+        Args:
+          comb (dict): The combination containing the dataset's parameters.
+        """
         
         def uncompress_function(file_name, host):
             action = Remote("gzip -d " + file_name, [ host ])
@@ -267,6 +290,11 @@ class HadoopEngine(Engine):
          
       
     def xp(self, comb):
+        """Perform the experiment corresponding to the given combination.
+        
+        Args:
+          comb (dict): The combination wit the experiment's parameters.
+        """
         comb_ok = False
         try:
             logger.info("Execute experiment with combination " + str(comb))
