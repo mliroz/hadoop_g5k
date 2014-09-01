@@ -274,7 +274,8 @@ class HadoopCluster(object):
         if self.initialized:
             if self.running:
                 self.stop()
-            self.clean()
+        else:
+            self.__force_clean()
 
         self.initialized = False
 
@@ -590,7 +591,7 @@ class HadoopCluster(object):
         proc = SshProcess(self.hadoop_base_dir + "/bin/stop-dfs.sh",
                           self.master)
         proc.run()
-
+        
         if not proc.finished_ok:
             logger.warn("Error while stopping HDFS")
         else:
@@ -607,7 +608,7 @@ class HadoopCluster(object):
         proc = SshProcess(self.hadoop_base_dir + "/bin/stop-mapred.sh",
                           self.master)
         proc.run()
-
+        
         if not proc.finished_ok:
             logger.warn("Error while stopping MapReduce")
         else:
@@ -769,7 +770,7 @@ class HadoopCluster(object):
 
         action = Remote("rm -rf " + self.hadoop_logs_dir + "/*", self.hosts)
         action.run()
-
+        
         if restart:
             self.start()
 
@@ -790,7 +791,7 @@ class HadoopCluster(object):
 
         action = Remote("rm -rf " + self.hadoop_temp_dir + " /tmp/hadoop-" + 
                         getpass.getuser() + "-*", self.hosts)
-        action.run()
+        action.run()  
 
         if restart:
             self.start()
@@ -809,6 +810,45 @@ class HadoopCluster(object):
         self.clean_data()
 
         self.initialized = False
+
+
+    def __force_clean(self):
+        """Stop previous hadoop processes (if any) and remove all remote files
+        created by it."""
+        
+        hadoop_processes = [
+            "DataNode",
+            "SecondaryNameNode",
+            "JobTracker",
+            "TaskTracker",
+            "NameNode"
+        ]
+        
+        force_kill = False
+        for h in self.hosts:
+            proc = SshProcess("jps", self.master)
+            proc.run()
+                        
+            ids_to_kill = []
+            for line in proc.stdout.splitlines():
+                field = line.split()
+                if field[1] in hadoop_processes:
+                    ids_to_kill.append(field[0])
+                    
+            if ids_to_kill:
+                force_kill = True
+                ids_to_kill_str = ""
+                for id in ids_to_kill:
+                    ids_to_kill_str += " " + id
+                    
+                proc = SshProcess("kill -9" + ids_to_kill_str, self.master)
+                proc.run()
+        
+        if force_kill:
+            logger.info("Processes from previous hadoop deployments had to be killed")
+        
+        self.clean_logs()
+        self.clean_data()
 
 
     def get_version(self):
