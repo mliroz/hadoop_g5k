@@ -16,6 +16,9 @@ from execo_g5k import get_cluster_site, get_oar_job_info, oardel, oarsub, \
     deploy, Deployment, get_current_oar_jobs
 from execo_engine import Engine, logger, sweep, ParamSweeper
 
+DEFAULT_DATA_BASE_DIR = "/tests/data"
+DEFAULT_OUT_BASE_DIR = "/tests/out"
+
 class HadoopEngine(Engine):
 
     def __init__(self):
@@ -44,6 +47,28 @@ class HadoopEngine(Engine):
                     default="1:00:00")
                     
         self.hc = None
+        
+        self.macros = {
+           "${data_base_dir}" : "/tests/data",
+           "${out_base_dir}" : "/tests/out",
+           "${data_dir}" : "/tests/data/0", # ${data_base_dir}/${ds_id}
+           "${out_dir}" : "/tests/out/0", # ${data_base_dir}/${comb_id}
+           "${comb_id}" : 0,
+           "${ds_id}" : 0,
+           "${xp.input}" : "/tests/data/0", # ${data_dir}
+           "${xp.output}" : "/tests/out/0" # ${out_dir}
+        }
+        
+        self.comb_id = 0
+        self.ds_id = 0
+        
+        
+    def __update_macros(self):
+        self.macros["${data_dir}"] = self.macros["${data_base_dir}"] + "/" + str(self.ds_id)
+        self.macros["${out_dir}"] = self.macros["${out_base_dir}"] + "/" + str(self.comb_id)
+        self.macros["${xp.input}"] = self.macros["${data_dir}"]
+        self.macros["${xp.output}"] = self.macros["${out_dir}"]
+        
 
     def run(self):
         """Inherited method, put here the code for running the engine"""
@@ -96,7 +121,7 @@ class HadoopEngine(Engine):
                 self.comb = comb
                 self.prepare_dataset(comb)
                 self.xp(comb)
-                
+                                
                 # subloop over the combinations that use the same dataset
                 while True:
                     newcomb = self.sweeper.get_next(lambda r:
@@ -148,7 +173,7 @@ class HadoopEngine(Engine):
         config.readfp(open(self.config_file))
         
         ds_parameters_names = config.options("ds_parameters")
-        xp_parameters_names = config.options("xp_parameters")
+        xp_parameters_names = config.options("xp_parameters")              
         
         # DATASET PARAMETERS
         self.ds_parameters = {}
@@ -162,29 +187,36 @@ class HadoopEngine(Engine):
                 ds_classes = [v.strip() for v in pv]
             else:
                 self.ds_parameters[pn] = [v.strip() for v in pv]
+                
+        if not config.has_option("ds_parameters","ds.class.dest"):
+            ds_class_parameters["dest"] = "${data_dir}"
         
         # Create ds configurations        
         self.ds_config = []
         for (idx, ds_class) in enumerate(ds_classes):
             this_ds_params = {}
             for pn, pv in ds_class_parameters.iteritems():
-                if len(pv) != len(ds_classes):
-                    logger.error("Number of ds_class does not much number of " + pn)
-                    # TODO: exeception
-                else:
+                if len(pv) == len(ds_classes):
                     if pv[idx]:
-                        this_ds_params[pn] = pv[idx]
+                        this_ds_params[pn] = pv[idx]                    
+                elif len(pv) == 1:
+                    this_ds_params[pn] = pv[0]
+                else:
+                    logger.error("Number of ds_class does not much number of " + pn)
+                    # TODO: exeception                    
+
             self.ds_config.append((ds_class, this_ds_params))
         
         self.ds_parameters["ds.config"] = range(0,len(self.ds_config))
-                                            
+        
             
         # EXPERIMENT PARAMETERS
         self.xp_parameters = {}
         for pn in xp_parameters_names:
             pv = config.get("xp_parameters", pn).split(",")
-            self.xp_parameters[pn] = [v.strip() for v in pv]
-        
+            self.xp_parameters[pn] = [v.strip() for v in pv]           
+            
+        # GLOBAL
         self.parameters = { }
         self.parameters.update(self.ds_parameters)
         self.parameters.update(self.xp_parameters)
@@ -232,6 +264,12 @@ class HadoopEngine(Engine):
             xp_params[pn] = params[pn]
         return xp_params
 
+    def _replace_macros(self, value):
+        new_value = value
+        for m in self.macros:
+            new_value = new_value.replace(m, str(self.macros[m]))
+            
+        return new_value
 
     def make_reservation(self):
         """Perform a reservation of the required number of nodes."""
@@ -326,6 +364,8 @@ class HadoopEngine(Engine):
         """
         
         logger.info("Prepare dataset with combination " + str(self.__get_ds_parameters(comb)))
+        self.ds_id += 1
+        self.__update_macros()
         
         # Initialize cluster and start
         self.hc.initialize()
@@ -358,7 +398,9 @@ class HadoopEngine(Engine):
             #return file_name[:-3] # Remove .gz (provisional)        
             return file_name[:-4] # Remove .bz2 (provisional)
         
-        self.ds.deploy(self.hc, "/test/ds", int(comb["ds.size"]), uncompress_function)
+        dest = self._replace_macros(ds_params["dest"])
+                
+        self.ds.deploy(self.hc, dest, int(comb["ds.size"]), uncompress_function)
          
       
     def xp(self, comb):
@@ -367,9 +409,12 @@ class HadoopEngine(Engine):
         Args:
           comb (dict): The combination wit the experiment's parameters.
         """
+        
         comb_ok = False
         try:
             logger.info("Execute experiment with combination " + str(self.__get_xp_parameters(comb)))
+            self.comb_id += 1
+            self.__update_macros()
 
             # TODO - the experiment
 
