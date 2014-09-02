@@ -8,7 +8,6 @@ import time
 import ConfigParser
 
 from hadoop_g5k import HadoopCluster
-from hadoop_g5k.dataset import StaticDataset
 
 from execo.action import Remote
 from execo.time_utils import timedelta_to_seconds, format_date
@@ -123,7 +122,7 @@ class HadoopEngine(Engine):
                     logger.info('Keeping job alive for debugging')
                     
             if self.hc:
-                if hc.initialized:
+                if self.hc.initialized:
                     self.hc.clean()
                     
 
@@ -149,18 +148,38 @@ class HadoopEngine(Engine):
         config.readfp(open(self.config_file))
         
         ds_parameters_names = config.options("ds_parameters")
-        
         xp_parameters_names = config.options("xp_parameters")
         
+        # DATASET PARAMETERS
         self.ds_parameters = {}
+        ds_class_parameters = {}
+        ds_classes = []
         for pn in ds_parameters_names:
             pv = config.get("ds_parameters", pn).split(",")
-            self.ds_parameters[pn] = [v.strip() for v in pv]
+            if pn.startswith("ds.class."):
+                ds_class_parameters[pn[len("ds.class."):]] = [v.strip() for v in pv]
+            elif pn == "ds.class":
+                ds_classes = [v.strip() for v in pv]
+            else:
+                self.ds_parameters[pn] = [v.strip() for v in pv]
         
-        # TODO: provisional
-        self.ds_parameters["ds.local_dir"] = ["/home/mliroz/datasets/wiki-stats/2008-01"]
-        self.ds = StaticDataset(self.ds_parameters["ds.local_dir"][0], self.ds_parameters["ds.size"])
+        # Create ds configurations        
+        self.ds_config = []
+        for (idx, ds_class) in enumerate(ds_classes):
+            this_ds_params = {}
+            for pn, pv in ds_class_parameters.iteritems():
+                if len(pv) != len(ds_classes):
+                    logger.error("Number of ds_class does not much number of " + pn)
+                    # TODO: exeception
+                else:
+                    if pv[idx]:
+                        this_ds_params[pn] = pv[idx]
+            self.ds_config.append((ds_class, this_ds_params))
+        
+        self.ds_parameters["ds.config"] = range(0,len(self.ds_config))
+                                            
             
+        # EXPERIMENT PARAMETERS
         self.xp_parameters = {}
         for pn in xp_parameters_names:
             pv = config.get("xp_parameters", pn).split(",")
@@ -169,12 +188,49 @@ class HadoopEngine(Engine):
         self.parameters = { }
         self.parameters.update(self.ds_parameters)
         self.parameters.update(self.xp_parameters)
-        logger.info(self.parameters)
+        
+        
+        # PRINT PARAMETERS
+        print_ds_parameters = {}
+        print_ds_parameters.update(self.ds_parameters)
+        print_ds_parameters["ds.config"] = self.ds_config
+        logger.info("Dataset parameters: " + str(print_ds_parameters))
+        logger.info("Experiment parameters: " + str(self.xp_parameters))
         
         self.sweeper = ParamSweeper(os.path.join(self.result_dir, "sweeps"), 
                                     sweep(self.parameters))
 
         logger.info('Number of parameters combinations %s', len(self.sweeper.get_remaining()))
+
+    def _import_class(self, name):
+        """Dynamically load a class and return a reference to it.
+        
+        Args:
+          name (str): the class name, including its package hierarchy.
+          
+        Returns:
+          A reference to the class.
+        """
+        
+        last_dot = name.rfind(".")
+        package_name = name[:last_dot]
+        class_name = name[last_dot + 1:]
+        
+        mod = __import__(package_name, fromlist=[class_name])
+        return getattr(mod, class_name)
+
+    def __get_ds_parameters(self, params):
+        ds_params = {}
+        for pn in self.ds_parameters:
+            ds_params[pn] = params[pn]
+        ds_params["ds.config"] = self.ds_config[params["ds.config"]]            
+        return ds_params
+        
+    def __get_xp_parameters(self, params):
+        xp_params = {}
+        for pn in self.xp_parameters:
+            xp_params[pn] = params[pn]
+        return xp_params
 
 
     def make_reservation(self):
@@ -263,7 +319,13 @@ class HadoopEngine(Engine):
         
         
     def prepare_dataset(self, comb):
-        logger.info("Prepare dataset with combination " + str(comb))
+        """Prepare the dataset to be used in the next set of experiments.
+        
+        Args:
+          comb (dict): The combination containing the dataset's parameters.        
+        """
+        
+        logger.info("Prepare dataset with combination " + str(self.__get_ds_parameters(comb)))
         
         # Initialize cluster and start
         self.hc.initialize()
@@ -280,13 +342,23 @@ class HadoopEngine(Engine):
           comb (dict): The combination containing the dataset's parameters.
         """
         
+        # Create dataset
+        ds_idx = comb["ds.config"]
+        (ds_class_name, ds_params) = self.ds_config[ds_idx]
+        ds_class = self._import_class(ds_class_name)
+        self.ds = ds_class(ds_params)   
+        
+        
+        # Deploy dataset
         def uncompress_function(file_name, host):
-            action = Remote("gzip -d " + file_name, [ host ])
+            #action = Remote("gzip -d " + file_name, [ host ])
+            action = Remote("bzip2 -d " + file_name, [ host ])
             action.run()
         
-            return file_name[:-3] # Remove .gz (provisional)        
+            #return file_name[:-3] # Remove .gz (provisional)        
+            return file_name[:-4] # Remove .bz2 (provisional)
         
-        self.ds.deploy(self.hc, "/test/ds", uncompress_function)
+        self.ds.deploy(self.hc, "/test/ds", int(comb["ds.size"]), uncompress_function)
          
       
     def xp(self, comb):
@@ -297,7 +369,7 @@ class HadoopEngine(Engine):
         """
         comb_ok = False
         try:
-            logger.info("Execute experiment with combination " + str(comb))
+            logger.info("Execute experiment with combination " + str(self.__get_xp_parameters(comb)))
 
             # TODO - the experiment
 
@@ -308,6 +380,7 @@ class HadoopEngine(Engine):
             else:
                 self.sweeper.cancel(comb)
             logger.info('%s Remaining',len(self.sweeper.get_remaining()))        
+
 
 if __name__ == "__main__":
     engine = HadoopEngine()    
