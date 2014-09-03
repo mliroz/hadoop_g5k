@@ -339,7 +339,8 @@ class HadoopCluster(object):
 
         self.__replace_in_file(os.path.join(self.conf_dir, CORE_CONF_FILE), 
             "fs.default.name",
-            self.master.address + ":" + str(self.hdfs_port), True)
+            "hdfs://" + self.master.address + ":" + str(self.hdfs_port) + "/",
+            True)
         self.__replace_in_file(os.path.join(self.conf_dir, CORE_CONF_FILE),
             "hadoop.tmp.dir",
             self.hadoop_temp_dir, True)
@@ -453,7 +454,7 @@ class HadoopCluster(object):
                 if ("</configuration>" in line and
                         create_if_absent and not changed):
                     outf.write("  <property><name>" + name + "</name>" + 
-                               "<value>" + value + "</vaue></property>\n");
+                               "<value>" + str(value) + "</value></property>\n");
                     outf.write(line)
                     changed = True
                 else:
@@ -515,6 +516,10 @@ class HadoopCluster(object):
         self.__check_initialization()
 
         logger.info("Starting HDFS")
+        
+        if self.running_dfs:
+          logger.warn("Dfs was already started")
+          return
 
         proc = SshProcess(self.hadoop_base_dir + "/bin/start-dfs.sh", 
                           self.master)
@@ -549,6 +554,10 @@ class HadoopCluster(object):
         self.__check_initialization()
 
         logger.info("Starting MapReduce")
+        
+        if self.running_map_reduce:
+          logger.warn("Mapred was already started")
+          return        
 
         proc = SshProcess(self.hadoop_base_dir + "/bin/start-mapred.sh",
                           self.master)
@@ -751,6 +760,23 @@ class HadoopCluster(object):
         action = Get([self.master], remoteFiles, dest)
         action.run()
 
+    def clean_history(self):
+        """Remove history."""
+
+        logger.info("Cleaning history")
+
+        restart = False
+        if self.running:
+            logger.warn("The cluster needs to be stopped before cleaning.")
+            self.stop()
+            restart = True
+
+        action = Remote("rm -rf " + self.hadoop_logs_dir + "/history", [ self.master ])
+        action.run()
+        
+        if restart:
+            self.start()
+        
 
     def clean_conf(self):
         """Clean configuration files used by this cluster."""
@@ -761,14 +787,11 @@ class HadoopCluster(object):
     def clean_logs(self):
         """Remove all hadoop logs."""
 
-        if self.running:
-            logger.warn("The cluster needs to be stopped before cleaning.")
-            self.stop()
-
         logger.info("Cleaning logs")
 
         restart = False
         if self.running:
+            logger.warn("The cluster needs to be stopped before cleaning.")
             self.stop()
             restart = True
 
