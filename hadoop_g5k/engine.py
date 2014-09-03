@@ -9,7 +9,8 @@ import ConfigParser
 
 from hadoop_g5k import HadoopCluster, HadoopJarJob
 
-from execo.action import Remote
+from execo.action import Get, Remote
+from execo.process import SshProcess
 from execo.time_utils import timedelta_to_seconds, format_date
 from execo_g5k import get_cluster_site, get_oar_job_info, oardel, oarsub, \
     get_planning, compute_slots, get_jobs_specs, get_oar_job_nodes, \
@@ -25,12 +26,13 @@ class HadoopEngine(Engine):
         self.frontend = None
         super(HadoopEngine, self).__init__()
         
+        # Parameter definition
         self.options_parser.set_usage("usage: %prog <cluster> <n_nodes> <config_file>")
         self.options_parser.add_argument("cluster",
                     "The cluster on which to run the experiment")
         self.options_parser.add_argument("n_nodes",
                     "The number of nodes in which the experiment is going to be deployed")
-        self.options_parser.add_argument("param_file",
+        self.options_parser.add_argument("config_file",
                     "The path of the file containing the test params (INI file)")                             
         self.options_parser.add_option("-k", dest="keep_alive",
                     help="keep reservation alive ..",
@@ -48,6 +50,7 @@ class HadoopEngine(Engine):
                     
         self.hc = None
         
+        # Configuration variables
         self.macros = {
            "${data_base_dir}" : "/tests/data",
            "${out_base_dir}" : "/tests/out",
@@ -58,10 +61,14 @@ class HadoopEngine(Engine):
            "${xp.input}" : "/tests/data/0", # ${data_dir}
            "${xp.output}" : "/tests/out/0" # ${out_dir}
         }
-        
         self.comb_id = 0
-        self.ds_id = 0
+        self.ds_id = 0        
         
+        self.stats_path = None
+        self.remove_output = True
+        self.output_path = None
+        self.summary_file_name = "summary.csv"
+                
         
     def __update_macros(self):
         self.macros["${data_dir}"] = self.macros["${data_base_dir}"] + "/" + str(self.ds_id)
@@ -149,6 +156,8 @@ class HadoopEngine(Engine):
             if self.hc:
                 if self.hc.initialized:
                     self.hc.clean()
+            
+            self.summary_file.close()
                     
 
     def _uses_same_ds(self, candidate_comb):
@@ -171,11 +180,28 @@ class HadoopEngine(Engine):
         
         config = ConfigParser.ConfigParser()
         config.readfp(open(self.config_file))
-        
-        ds_parameters_names = config.options("ds_parameters")
-        xp_parameters_names = config.options("xp_parameters")              
+                
+        # TEST PARAMETERS
+        if config.has_section("test_parameters"):
+            test_parameters_names = config.options("test_parameters")        
+            if "test.stats_path" in test_parameters_names:
+                self.stats_path = config.get("test_parameters", "test.stats_path")
+                if not os.path.exists(self.stats_path):
+                    os.makedirs(self.stats_path)
+
+            if "test.remove_output" in test_parameters_names:
+                self.remove_output = bool(config.get("test_parameters", "test.remove_output"))
+
+            if "test.output_path" in test_parameters_names:
+                self.output_path = config.get("test_parameters", "test.output_path")            
+                if not os.path.exists(self.output_path):
+                    os.makedirs(self.output_path)
+            
+            if "test.summary_file" in test_parameters_names:
+                self.summary_file_name = config.get("test_parameters", "test.summary_file")               
         
         # DATASET PARAMETERS
+        ds_parameters_names = config.options("ds_parameters")        
         self.ds_parameters = {}
         ds_class_parameters = {}
         ds_classes = []
@@ -210,6 +236,7 @@ class HadoopEngine(Engine):
         self.ds_parameters["ds.config"] = range(0,len(self.ds_config))
         
         # EXPERIMENT PARAMETERS
+        xp_parameters_names = config.options("xp_parameters")        
         self.xp_parameters = {}
         for pn in xp_parameters_names:
             pv = config.get("xp_parameters", pn).split(",")
@@ -220,6 +247,16 @@ class HadoopEngine(Engine):
         self.parameters.update(self.ds_parameters)
         self.parameters.update(self.xp_parameters)
         
+        # SUMMARY FILE
+        self.summary_file = open(self.summary_file_name, "w")        
+        self.summary_props = []
+        self.summary_props.extend(self.ds_parameters.keys())
+        self.summary_props.extend(self.xp_parameters.keys())
+        header = "comb_id, job_id" 
+        for pn in self.summary_props:
+            header += ", " + str(pn)
+        self.summary_file.write(header + "\n")
+        self.summary_file.flush()
         
         # PRINT PARAMETERS
         print_ds_parameters = {}
@@ -417,7 +454,7 @@ class HadoopEngine(Engine):
         """Perform the experiment corresponding to the given combination.
         
         Args:
-          comb (dict): The combination wit the experiment's parameters.
+          comb (dict): The combination with the experiment's parameters.
         """
         
         comb_ok = False
@@ -425,25 +462,22 @@ class HadoopEngine(Engine):
             logger.info("Execute experiment with combination " + str(self.__get_xp_parameters(comb)))
             self.comb_id += 1
             self.__update_macros()
-
-            # Create hadoop jon
-            xp_job_parts = self._replace_macros(comb["xp.job"]).split("||")
-            jar_path = xp_job_parts[0].strip()
-            if len(xp_job_parts) > 1:
-                params = xp_job_parts[1].strip()
-                if len(xp_job_parts) == 3:
-                    lib_jars = xp_job_parts[2].strip()
-                else:
-                    lib_jars = None
-            else:
-                params = None
-                lib_jars = None
-            job = HadoopJarJob(jar_path, params, lib_jars)
+            
+            # Prepare
+            self._change_hadoop_conf(comb)
+            job = self._create_hadoop_job(comb)
             
             # Execute job
             self.hc.execute_jar(job)
+            self._update_summary(comb, job)            
+                        
+            # Post-execution
+            self._copy_xp_output()             
+            self._remove_xp_output()
+            self._copy_xp_stats()
 
             comb_ok = True
+            
         finally:
             if comb_ok:
                 self.sweeper.done(comb)
@@ -451,6 +485,94 @@ class HadoopEngine(Engine):
                 self.sweeper.cancel(comb)
             logger.info('%s Remaining',len(self.sweeper.get_remaining()))        
 
+
+    def _change_hadoop_conf(self, comb):
+        """Change hadoop's configuration by using the experiment's parameters.
+        
+        Args:
+          comb (dict): The combination with the experiment's parameters.
+        """
+        
+        self.hc.stop() # Some parameters only take effect after restart
+        mr_params = {}
+        for pn in self.__get_xp_parameters(comb):
+            if not pn.startswith("xp."):
+                mr_params[pn] = comb[pn]
+
+        self.hc.change_conf(mr_params)
+        self.hc.start_and_wait()
+        
+        # TODO: provisional hack to avoid safemode
+        time.sleep(10)
+        
+    def _create_hadoop_job(self, comb):
+        """Create the hadoop job.
+        
+        Args:
+          comb (dict): The combination with the experiment's parameters.
+        """
+        
+        xp_job_parts = self._replace_macros(comb["xp.job"]).split("||")
+        jar_path = xp_job_parts[0].strip()
+        if len(xp_job_parts) > 1:
+            params = xp_job_parts[1].strip()
+            if len(xp_job_parts) == 3:
+                lib_jars = xp_job_parts[2].strip()
+            else:
+                lib_jars = None
+        else:
+            params = None
+            lib_jars = None
+            
+        return HadoopJarJob(jar_path, params, lib_jars)
+    
+    def _update_summary(self, comb, job):
+        """Update test summary with the executed job"""
+        
+        line = str(self.comb_id) + ", " + job.job_id
+        for pn in self.summary_props:
+            line += ", " + str(comb[pn])
+        self.summary_file.write(line + "\n")
+        self.summary_file.flush()        
+        
+    def _copy_xp_output(self):
+        """Copy experiment's output"""
+        
+        if self.output_path:
+            remote_path = self.macros["${xp.output}"]
+            local_path = os.path.join(self.output_path,str(self.comb_id))
+            logger.info("Copying output to " + local_path)
+
+            tmp_dir = "/tmp"
+            
+            # Remove file in tmp dir if exists
+            proc = SshProcess("rm -rf " + os.path.join(tmp_dir, os.path.basename(remote_path)), self.hc.master)
+            proc.run()
+
+            # Get files in master
+            self.hc.execute("fs -get " + remote_path + " " + tmp_dir, verbose = False)
+
+            # Copy files from master
+            action = Get([self.hc.master], [ os.path.join(tmp_dir,os.path.basename(remote_path)) ], local_path)
+            action.run()            
+    
+    def _remove_xp_output(self):
+        """Remove experiment's output."""
+        
+        if self.remove_output:
+            logger.info("Remove output")
+            self.hc.execute("fs -rmr " + self.macros["${xp.output}"], verbose = False)        
+    
+    def _copy_xp_stats(self):
+        """Copy job stats and clean them in the cluster."""
+        
+        if self.stats_path:
+            local_path = os.path.join(self.stats_path,str(self.comb_id))
+            logger.info("Copying stats to " + local_path)
+            self.hc.stop()
+            self.hc.copy_history(local_path)
+            self.hc.clean_history()
+        
 
 if __name__ == "__main__":
     engine = HadoopEngine()    
