@@ -7,7 +7,7 @@ import sys
 import time
 import ConfigParser
 
-from hadoop_g5k import HadoopCluster
+from hadoop_g5k import HadoopCluster, HadoopJarJob
 
 from execo.action import Remote
 from execo.time_utils import timedelta_to_seconds, format_date
@@ -209,7 +209,6 @@ class HadoopEngine(Engine):
         
         self.ds_parameters["ds.config"] = range(0,len(self.ds_config))
         
-            
         # EXPERIMENT PARAMETERS
         self.xp_parameters = {}
         for pn in xp_parameters_names:
@@ -388,18 +387,29 @@ class HadoopEngine(Engine):
         ds_class = self._import_class(ds_class_name)
         self.ds = ds_class(ds_params)   
         
-        
         # Deploy dataset
+        
+        # Temporarily hard coded ----------------------------------------------
         def uncompress_function(file_name, host):
             #action = Remote("gzip -d " + file_name, [ host ])
             action = Remote("bzip2 -d " + file_name, [ host ])
             action.run()
+            
+            base_name = os.path.basename(file_name[:-4])
+            dir_name = os.path.dirname(file_name[:-4])
+            
+            new_name = dir_name + "/data-" + base_name
+            
+            action = Remote("mv " + file_name[:-4] + " " + new_name, [ host ])
+            action.run()
         
             #return file_name[:-3] # Remove .gz (provisional)        
-            return file_name[:-4] # Remove .bz2 (provisional)
+            #return file_name[:-4] # Remove .bz2 (provisional)
+            return new_name
+        # ---------------------------------------------------------------------
         
         dest = self._replace_macros(ds_params["dest"])
-                
+
         self.ds.deploy(self.hc, dest, int(comb["ds.size"]), uncompress_function)
          
       
@@ -416,7 +426,22 @@ class HadoopEngine(Engine):
             self.comb_id += 1
             self.__update_macros()
 
-            # TODO - the experiment
+            # Create hadoop jon
+            xp_job_parts = self._replace_macros(comb["xp.job"]).split("||")
+            jar_path = xp_job_parts[0].strip()
+            if len(xp_job_parts) > 1:
+                params = xp_job_parts[1].strip()
+                if len(xp_job_parts) == 3:
+                    lib_jars = xp_job_parts[2].strip()
+                else:
+                    lib_jars = None
+            else:
+                params = None
+                lib_jars = None
+            job = HadoopJarJob(jar_path, params, lib_jars)
+            
+            # Execute job
+            self.hc.execute_jar(job)
 
             comb_ok = True
         finally:
