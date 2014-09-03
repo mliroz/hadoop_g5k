@@ -139,7 +139,7 @@ if __name__ == "__main__":
                         action="store",
                         nargs=1,
                         metavar="ID",
-                        help="The identifier of the cluster. If not indicated, last used cluster will be used (if any).")
+                        help="The identifier of the cluster. If not indicated, last used cluster will be used (if any)")
 
     actions.add_argument("--node",
                         action="store",
@@ -252,11 +252,11 @@ if __name__ == "__main__":
                         const="general",
                         metavar="general | files | dfs | dfsblocks | mrjobs",
                         help="Show the cluster state. The output depends on optional argument:\n" + 
-                             "  general    Show general cluster state (default option).\n" +
-                             "  files      Show dfs file hierarchy.\n" +
-                             "  dfs        Show filesystem state.\n" +
-                             "  dfsblocks  Show dfs blocks information.\n" +
-                             "  mrjobs     Show mapreduce state.\n")
+                             "  general    Show general cluster state (default option)\n" +
+                             "  files      Show dfs file hierarchy\n" +
+                             "  dfs        Show filesystem state\n" +
+                             "  dfsblocks  Show dfs blocks information\n" +
+                             "  mrjobs     Show mapreduce state\n")
                                            
 
     args = parser.parse_args()
