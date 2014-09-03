@@ -187,9 +187,12 @@ class HadoopJarJob(object):
             libs_param = ""
 
 
-        params_str = ""
-        for p in self.params:
-            params_str += " " + p
+        if isinstance(self.params, basestring):
+            params_str = " " + self.params
+        else:
+            params_str = ""
+            for p in self.params:
+                params_str += " " + p
 
         return "jar " + jar_file + libs_param + params_str
         
