@@ -426,12 +426,25 @@ if __name__ == "__main__":
             
             (stdout, stderr) = hc.execute("fs -dus /", verbose = False)            
             pos = stdout.rfind("\t")
-            print "Total Size = " + stdout[pos + 1:]            
+            size = int(stdout[pos + 1:])
+            
+            human_readable_size = ""
+            if 1024 < size < 1024*1024:
+                human_readable_size = " (%.1f KB)" + (float(size)/1024)
+            elif 1024*1024 < size < 1024*1024*1024:
+                human_readable_size = " (%.1f MB)" + (float(size)/(1024*1024))
+            elif size > 1024*1024*1024:
+                human_readable_size = " (%.1f GB)" % (float(size)/(1024*1024*1024))
+        
+            print "Total Size = " + str(size) + human_readable_size + "\n"
                     
         elif args.state == "dfs":
             (stdout, stderr) = hc.execute("dfsadmin -report", verbose = False)
+            print ""            
+            for line in stdout.splitlines():
+                if not "WARN fs.FileSystem" in line:
+                    print line
             print ""
-            print stdout
             
         elif args.state == "dfsblocks":
             (stdout, stderr) = hc.execute("fsck -blocks", verbose = False)
