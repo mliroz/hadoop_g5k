@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 
-
 import datetime
 import os
 import sys
@@ -19,6 +18,9 @@ from execo_engine import Engine, logger, sweep, ParamSweeper
 
 DEFAULT_DATA_BASE_DIR = "/tests/data"
 DEFAULT_OUT_BASE_DIR = "/tests/out"
+
+class HadoopEngineException(Exception): pass
+class ParameterException(HadoopEngineException): pass
 
 class HadoopEngine(Engine):
 
@@ -49,7 +51,7 @@ class HadoopEngine(Engine):
                     default="1:00:00")
                     
         self.hc = None
-        
+
         # Configuration variables
         self.macros = {
            "${data_base_dir}" : "/tests/data",
@@ -69,8 +71,11 @@ class HadoopEngine(Engine):
         self.output_path = None
         self.summary_file_name = "summary.csv"
         self.ds_summary_file_name = "ds-summary.csv"
-                
+        self.summary_file = None
+        self.ds_summary_file = None
         
+        self.hadoop_props = None
+
     def __update_macros(self):
         self.macros["${data_dir}"] = self.macros["${data_base_dir}"] + "/" + str(self.ds_id)
         self.macros["${out_dir}"] = self.macros["${out_base_dir}"] + "/" + str(self.comb_id)
@@ -89,6 +94,7 @@ class HadoopEngine(Engine):
         
         if not os.path.exists(self.config_file):
             logger.error("Params file " + self.params_file + " does not exist")
+            sys.exit(1)
         
         # Set oar job id
         if self.options.oar_job_id:
@@ -154,11 +160,16 @@ class HadoopEngine(Engine):
                 else:
                     logger.info('Keeping job alive for debugging')
                     
+            # Clean cluster
             if self.hc:
                 if self.hc.initialized:
                     self.hc.clean()
             
-            self.summary_file.close()
+            # Close summary files
+            if self.summary_file:
+                self.summary_file.close()
+            if self.ds_summary_file:
+                self.ds_summary_file.close()
                     
 
     def _uses_same_ds(self, candidate_comb):
@@ -202,7 +213,13 @@ class HadoopEngine(Engine):
                 self.summary_file_name = config.get("test_parameters", "test.summary_file")               
                 
             if "test.ds_summary_file" in test_parameters_names:
-                self.ds_summary_file_name = config.get("test_parameters", "test.ds_summary_file")                               
+                self.ds_summary_file_name = config.get("test_parameters", "test.ds_summary_file")
+                
+            if "test.hadoop.properties" in test_parameters_names:
+                self.hadoop_props = config.get("test_parameters", "test.hadoop.properties")
+                if not os.path.exists(self.hadoop_props):
+                    logger.error("Hadoop properties file " + self.hadoop_props + " does not exist")
+                    raise ParameterException("Hadoop properties file " + self.hadoop_props + " does not exist")
         
         # DATASET PARAMETERS
         ds_parameters_names = config.options("ds_parameters")        
@@ -233,7 +250,7 @@ class HadoopEngine(Engine):
                     this_ds_params[pn] = pv[0]
                 else:
                     logger.error("Number of ds_class does not much number of " + pn)
-                    # TODO: exeception                    
+                    raise ParameterException("Number of ds_class does not much number of " + pn)
 
             self.ds_config.append((ds_class, this_ds_params))
         
@@ -320,7 +337,7 @@ class HadoopEngine(Engine):
             new_value = new_value.replace(m, str(self.macros[m]))
             
         return new_value
-
+    
     def make_reservation(self):
         """Perform a reservation of the required number of nodes."""
 
@@ -597,8 +614,4 @@ class HadoopEngine(Engine):
             self.hc.stop()
             self.hc.copy_history(local_path)
             self.hc.clean_history()
-        
 
-if __name__ == "__main__":
-    engine = HadoopEngine()    
-    engine.start()

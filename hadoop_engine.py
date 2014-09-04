@@ -1,0 +1,7 @@
+#!/usr/bin/env python
+
+from hadoop_g5k.engine import HadoopEngine
+
+if __name__ == "__main__":
+    engine = HadoopEngine()    
+    engine.start()

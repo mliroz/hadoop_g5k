@@ -32,8 +32,9 @@ DEFAULT_HADOOP_MR_PORT = 54311
 DEFAULT_HADOOP_LOCAL_CONF_DIR = "/home/" + getpass.getuser() + \
                                 "/common/hadoop/conf"
 
-class NotInitialized(Exception):
-    pass
+class HadoopException(Exception): pass
+class HadoopNotInitializedException(HadoopException): pass
+class HadoopJobException(HadoopException): pass
 
 class HadoopTopology(object):
     """This class is able to produce and manage a Hadoop topology."""
@@ -151,7 +152,7 @@ class HadoopJarJob(object):
         # Check if the jar file exists
         if not os.path.exists(jar_path):
             logger.error("Jar file " + jar_path + " does not exist")
-            return # TODO - exception
+            raise HadoopJobException("Jar file " + jar_path + " does not exist")
 
         # Check if the libraries exist
         for lp in lib_paths:
@@ -321,11 +322,12 @@ class HadoopCluster(object):
         not.
         
         Raises:
-          NotInitialized: If self.initialized = False
+          HadoopNotInitializedException: If self.initialized = False
         """
+        
         if not self.initialized:
             logger.error("The cluster should be initialized")
-            raise NotInitialized()
+            raise HadoopNotInitializedException("The cluster should be initialized")
 
     def __configure_servers(self):
         """Configure servers and host-dependant parameters (TODO - we assume all
@@ -657,9 +659,7 @@ class HadoopCluster(object):
             is displayed. (default: True)
         """
 
-        if not self.initialized:
-            logger.error("The cluster should be initialized")
-            return
+        self.__check_initialization()
 
         if should_be_running and not self.running:
             logger.warn("The cluster was stopped. Starting it automatically")
@@ -696,9 +696,7 @@ class HadoopCluster(object):
             is displayed. (default: True)          
         """
 
-        if not self.initialized:
-            logger.error("The cluster should be initialized")
-            return
+        self.__check_initialization()
         
         if not self.running:
             logger.warn("The cluster was stopped. Starting it automatically")
