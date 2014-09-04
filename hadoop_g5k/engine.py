@@ -68,6 +68,7 @@ class HadoopEngine(Engine):
         self.remove_output = True
         self.output_path = None
         self.summary_file_name = "summary.csv"
+        self.ds_summary_file_name = "ds-summary.csv"
                 
         
     def __update_macros(self):
@@ -199,6 +200,9 @@ class HadoopEngine(Engine):
             
             if "test.summary_file" in test_parameters_names:
                 self.summary_file_name = config.get("test_parameters", "test.summary_file")               
+                
+            if "test.ds_summary_file" in test_parameters_names:
+                self.ds_summary_file_name = config.get("test_parameters", "test.ds_summary_file")                               
         
         # DATASET PARAMETERS
         ds_parameters_names = config.options("ds_parameters")        
@@ -247,7 +251,9 @@ class HadoopEngine(Engine):
         self.parameters.update(self.ds_parameters)
         self.parameters.update(self.xp_parameters)
         
-        # SUMMARY FILE
+        # SUMMARY FILES
+        
+        # Xp summary
         self.summary_file = open(self.summary_file_name, "w")        
         self.summary_props = []
         self.summary_props.extend(self.ds_parameters.keys())
@@ -257,6 +263,14 @@ class HadoopEngine(Engine):
             header += ", " + str(pn)
         self.summary_file.write(header + "\n")
         self.summary_file.flush()
+        
+        print self.ds_config
+        
+        # Ds summary
+        self.ds_summary_file = open(self.ds_summary_file_name, "w")        
+        header = "ds_id, ds_class, ds_class_properties" 
+        self.ds_summary_file.write(header + "\n")
+        self.ds_summary_file.flush()        
         
         # PRINT PARAMETERS
         print_ds_parameters = {}
@@ -448,7 +462,18 @@ class HadoopEngine(Engine):
         dest = self._replace_macros(ds_params["dest"])
 
         self.ds.deploy(self.hc, dest, int(comb["ds.size"]), uncompress_function)
+        
+        self._update_ds_summary(comb)
          
+    def _update_ds_summary(self, comb):
+        """Update ds summary with the deployed ds"""
+        
+        ds_idx = comb["ds.config"]
+        (ds_class_name, ds_params) = self.ds_config[ds_idx]        
+        
+        line = str(self.ds_id - 1) + "," + ds_class_name + "," + str(ds_params)
+        self.ds_summary_file.write(line + "\n")
+        self.ds_summary_file.flush()            
       
     def xp(self, comb):
         """Perform the experiment corresponding to the given combination.
