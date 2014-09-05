@@ -2,6 +2,7 @@
 
 import datetime
 import os
+import re
 import sys
 import time
 import ConfigParser
@@ -15,14 +16,200 @@ from execo_g5k import get_cluster_site, get_oar_job_info, oardel, oarsub, \
     get_planning, compute_slots, get_jobs_specs, get_oar_job_nodes, \
     deploy, Deployment, get_current_oar_jobs
 from execo_engine import Engine, logger, sweep, ParamSweeper
+from networkx import DiGraph, NetworkXUnfeasible, topological_sort
 
 DEFAULT_DATA_BASE_DIR = "/tests/data"
 DEFAULT_OUT_BASE_DIR = "/tests/out"
 
 class HadoopEngineException(Exception): pass
 class ParameterException(HadoopEngineException): pass
+class MacroException(ParameterException): pass
+
+class MacroManager(object):
+    
+    def __init__(self):
+        """Crate a new MacroManager object."""
+    
+        self.dep_graph = DiGraph()
+        
+        self.ds_macros = set([])
+        self.xp_macros = set([])
+        
+        self.define_test_macros()
+        
+        
+    def define_test_macros(self):
+        """Define values and dependencies of test macros."""        
+        
+        self.test_macros = {
+           "data_base_dir" : "/tests/data",
+           "out_base_dir" : "/tests/out",
+           "data_dir" : "/tests/data/0", # data_base_dir/ds_id
+           "out_dir" : "/tests/out/0", # data_base_dir/comb_id
+           "comb_id" : 0,
+           "ds_id" : 0,
+           "xp.input" : "/tests/data/0", # data_dir
+           "xp.output" : "/tests/out/0" # out_dir
+        }
+        
+        self.ds_params = set([])
+        self.xp_params = set([])
+        
+        self.dep_graph.add_nodes_from(self.test_macros.keys())
+               
+        self.add_dependency("data_base_dir","data_dir")
+        self.add_dependency("ds_id","data_dir")
+        self.add_dependency("data_dir","xp.input")
+        
+        self.add_dependency("out_base_dir","out_dir")
+        self.add_dependency("comb_id","out_dir")
+        self.add_dependency("out_dir","xp.output")
+        
+        self.sorted_test_macros = topological_sort(self.dep_graph)
+        
+    def update_test_macros(self, ds_id = None, comb_id = None):
+        """Update test macros with dataset and/or combination ids.
+        
+        Args:
+          ds_id (int, optional): The dataset identifier.
+          comb_id (int, optional): The combination identifier.
+        """
+        
+        if ds_id:
+            if "data_dir" in self.test_macros:
+                self.test_macros["data_dir"] = self.test_macros["data_base_dir"] + "/" + str(ds_id)
+                if "xp.input" in self.test_macros:
+                    self.test_macros["xp.input"] = self.test_macros["data_dir"]
+        if comb_id:            
+            if "out_dir" in self.test_macros:
+                self.test_macros["out_dir"] = self.test_macros["out_base_dir"] + "/" + str(comb_id)
+                if "xp.output" in self.test_macros:
+                    self.test_macros["xp.output"] = self.test_macros["out_dir"]          
+        
+    def __filter_unused_test_macros(self):
+        for m in reversed(self.sorted_test_macros):
+            if not self.dep_graph.successors(m):
+                self.dep_graph.remove_node(m)
+                self.sorted_test_macros.remove(m)
+                del self.test_macros[m]
+        
+        
+    def add_ds_params(self, params):
+        """Add the list of dataset parameters.
+        
+        Args:
+          params (dict): The list of dataset parameters.
+        """
+        
+        self.ds_params = self.ds_params.union(params)    
+        
+    def add_xp_params(self, params):
+        """Add the list of experiment parameters.
+        
+        Args:
+          params (dict): The list of experiment parameters.
+        """
+        
+        self.xp_params = self.xp_params.union(params)
+        
+        
+    def add_dependency(self, m1, m2):
+        """Includes a new macro dependency: m1 -> m2. This means that to obtain
+        the value of m2 we use the value of m1.
+        
+        Args:
+          m1 (string): The name of the param used.
+          m2 (string): The name of the param being specified.
+        """      
+                    
+        # Check if dependency is correct
+        if m1 in self.ds_params:
+            if m2 in self.test_macros:
+                logger.error("Not allowed dependency: ds -> test")
+                raise MacroException("Not allowed dependency: ds -> test")
+        elif m1 in self.xp_params:
+            if m2 in self.test_macros:
+                logger.error("Not allowed dependency: xp -> test")
+                raise MacroException("Not allowed dependency: xp -> test")
+            elif m2 in self.ds_params:
+                logger.error("Not allowed dependency: xp -> ds")
+                raise MacroException("Not allowed dependency: xp -> ds")
+            
+        # Add dependency
+        self.dep_graph.add_edge(m1, m2)
+        
+        
+    def sort_macros(self):
+        """Sort macros respecting dependencies.
+        
+        Raises:
+          MacroException: if there are cycles in the dependencies between macros.
+        """
+        
+        # Filter out unused test variables
+        self.__filter_unused_test_macros()
+        
+        # Sort ds and xp macros
+        try:
+            self.sorted_ds_macros = topological_sort(self.dep_graph.subgraph(self.ds_params))
+            self.sorted_xp_macros = topological_sort(self.dep_graph.subgraph(self.xp_params))
+        except NetworkXUnfeasible:
+            raise MacroException("Macros do not follow a DAG")
+        
+        logger.info("Dependencies = " + str(self.dep_graph.edges()))        
+        logger.info("Test macros = " + str(self.sorted_test_macros))
+        logger.info("Dataset macros = " + str(self.sorted_ds_macros))
+        logger.info("Experiment macros = " + str(self.sorted_xp_macros))
+        
+    def _replace_macros_from_list(self, list_macros, value):
+        """Replace the macros given in the list within the value if present.
+        
+        Args:
+          list_macros (dict): The list of macros to replace and their respective
+            values.
+          value (string): The value where to do the replacement.
+        """
+        
+        new_value = value
+        for m in list_macros:
+            new_value = new_value.replace("${" + m + "}", str(list_macros[m]))            
+        return new_value
+            
+        
+    def replace_ds_macros(self, comb):
+        """Replace macros in ds combination.
+        
+        Args:
+          comb (dict): The combination of parameters.
+        """
+                
+        list_macros = self.test_macros
+        
+        for m in self.sorted_ds_macros:
+            comb[m] = self._replace_macros_from_list(list_macros, comb[m])
+            list_macros[m] = comb[m]
+            
+        
+    def replace_xp_macros(self, comb):
+        """Replace macros in xp combination.
+        
+        Args:
+          comb (dict): The combination of parameters.
+        """
+        
+        list_macros = self.test_macros
+        
+        for m in self.sorted_ds_macros:
+            comb[m] = self._replace_macros_from_list(list_macros, comb[m])
+            list_macros[m] = comb[m]
+        
+        for m in self.sorted_xp_macros:
+            comb[m] = self._replace_macros_from_list(list_macros, comb[m])
+            list_macros[m] = comb[m]        
+        
 
 class HadoopEngine(Engine):
+    """This class manages thw whole workflow of a hadoop test suite."""
 
     def __init__(self):
         self.frontend = None
@@ -53,16 +240,7 @@ class HadoopEngine(Engine):
         self.hc = None
 
         # Configuration variables
-        self.macros = {
-           "${data_base_dir}" : "/tests/data",
-           "${out_base_dir}" : "/tests/out",
-           "${data_dir}" : "/tests/data/0", # ${data_base_dir}/${ds_id}
-           "${out_dir}" : "/tests/out/0", # ${data_base_dir}/${comb_id}
-           "${comb_id}" : 0,
-           "${ds_id}" : 0,
-           "${xp.input}" : "/tests/data/0", # ${data_dir}
-           "${xp.output}" : "/tests/out/0" # ${out_dir}
-        }
+        self.macro_manager = MacroManager()
         self.comb_id = 0
         self.ds_id = 0        
         
@@ -75,12 +253,6 @@ class HadoopEngine(Engine):
         self.ds_summary_file = None
         
         self.hadoop_props = None
-
-    def __update_macros(self):
-        self.macros["${data_dir}"] = self.macros["${data_base_dir}"] + "/" + str(self.ds_id)
-        self.macros["${out_dir}"] = self.macros["${out_base_dir}"] + "/" + str(self.comb_id)
-        self.macros["${xp.input}"] = self.macros["${data_dir}"]
-        self.macros["${xp.output}"] = self.macros["${out_dir}"]
         
 
     def run(self):
@@ -132,6 +304,7 @@ class HadoopEngine(Engine):
 
                 # Getting the next combination (which requires a dataset deployment)
                 comb = self.sweeper.get_next()
+                self.raw_comb = comb.copy()
                 self.comb = comb
                 self.prepare_dataset(comb)
                 self.xp(comb)
@@ -141,6 +314,7 @@ class HadoopEngine(Engine):
                     newcomb = self.sweeper.get_next(lambda r:
                             filter(self._uses_same_ds, r))
                     if newcomb:
+                        self.raw_comb = newcomb.copy()
                         try:
                             self.xp(newcomb)
                         except:
@@ -180,9 +354,9 @@ class HadoopEngine(Engine):
           candidate_comb (dict): The combination candidate to be selected as the
             new combination.
         """
-        
+                
         for var in self.ds_parameters.keys():
-          if candidate_comb[var] != self.comb[var]:
+          if candidate_comb[var] != self.raw_comb[var]:
             return False
         return True
       
@@ -235,7 +409,7 @@ class HadoopEngine(Engine):
             else:
                 self.ds_parameters[pn] = [v.strip() for v in pv]
                 
-        if not config.has_option("ds_parameters","ds.class.dest"):
+        if not config.has_option("ds_parameters","ds.dest"):
             ds_class_parameters["dest"] = "${data_dir}"
         
         # Create ds configurations        
@@ -262,11 +436,21 @@ class HadoopEngine(Engine):
         for pn in xp_parameters_names:
             pv = config.get("xp_parameters", pn).split(",")
             self.xp_parameters[pn] = [v.strip() for v in pv]           
-            
+                       
         # GLOBAL
         self.parameters = { }
         self.parameters.update(self.ds_parameters)
         self.parameters.update(self.xp_parameters)
+        
+        # MACROS
+        self.macro_manager.add_ds_params(self.ds_parameters)
+        self.macro_manager.add_xp_params(self.xp_parameters)
+        for pn in self.parameters:
+            for pv in self.parameters[pn]:
+                macros = re.findall('\$\{([^}]*)\}',str(pv)) # TODO: filter out non-strings
+                for m in macros:
+                    self.macro_manager.add_dependency(m, pn)
+        self.macro_manager.sort_macros()
         
         # SUMMARY FILES
         
@@ -280,8 +464,6 @@ class HadoopEngine(Engine):
             header += ", " + str(pn)
         self.summary_file.write(header + "\n")
         self.summary_file.flush()
-        
-        print self.ds_config
         
         # Ds summary
         self.ds_summary_file = open(self.ds_summary_file_name, "w")        
@@ -330,13 +512,7 @@ class HadoopEngine(Engine):
         for pn in self.xp_parameters:
             xp_params[pn] = params[pn]
         return xp_params
-
-    def _replace_macros(self, value):
-        new_value = value
-        for m in self.macros:
-            new_value = new_value.replace(m, str(self.macros[m]))
-            
-        return new_value
+    
     
     def make_reservation(self):
         """Perform a reservation of the required number of nodes."""
@@ -432,7 +608,9 @@ class HadoopEngine(Engine):
         
         logger.info("Prepare dataset with combination " + str(self.__get_ds_parameters(comb)))
         self.ds_id += 1
-        self.__update_macros()
+        self.macro_manager.update_test_macros(ds_id = self.ds_id)
+        self.macro_manager.replace_ds_macros(comb)        
+        logger.info("Combination after macro replacement " + str(self.__get_ds_parameters(comb)))
         
         # Initialize cluster and start
         self.hc.initialize()
@@ -476,10 +654,7 @@ class HadoopEngine(Engine):
             return new_name
         # ---------------------------------------------------------------------
         
-        dest = self._replace_macros(ds_params["dest"])
-
-        self.ds.deploy(self.hc, dest, int(comb["ds.size"]), uncompress_function)
-        
+        self.ds.deploy(self.hc, comb["ds.dest"], int(comb["ds.size"]), uncompress_function)
         self._update_ds_summary(comb)
          
     def _update_ds_summary(self, comb):
@@ -503,7 +678,9 @@ class HadoopEngine(Engine):
         try:
             logger.info("Execute experiment with combination " + str(self.__get_xp_parameters(comb)))
             self.comb_id += 1
-            self.__update_macros()
+            self.macro_manager.update_test_macros(comb_id = self.comb_id)
+            self.macro_manager.replace_xp_macros(comb)            
+            logger.info("Combination after macro replacement " + str(self.__get_xp_parameters(comb)))
             
             # Prepare
             self._change_hadoop_conf(comb)
@@ -554,7 +731,7 @@ class HadoopEngine(Engine):
           comb (dict): The combination with the experiment's parameters.
         """
         
-        xp_job_parts = self._replace_macros(comb["xp.job"]).split("||")
+        xp_job_parts = comb["xp.job"].split("||") # TODO
         jar_path = xp_job_parts[0].strip()
         if len(xp_job_parts) > 1:
             params = xp_job_parts[1].strip()
@@ -581,7 +758,7 @@ class HadoopEngine(Engine):
         """Copy experiment's output"""
         
         if self.output_path:
-            remote_path = self.macros["${xp.output}"]
+            remote_path = self.macro_manager.test_macros["xp.output"] # TODO: what happens if not specified?
             local_path = os.path.join(self.output_path,str(self.comb_id))
             logger.info("Copying output to " + local_path)
 
@@ -603,7 +780,7 @@ class HadoopEngine(Engine):
         
         if self.remove_output:
             logger.info("Remove output")
-            self.hc.execute("fs -rmr " + self.macros["${xp.output}"], verbose = False)        
+            self.hc.execute("fs -rmr " + self.macro_manager.test_macros["xp.output"], verbose = False) # TODO: what happens if not specified?
     
     def _copy_xp_stats(self):
         """Copy job stats and clean them in the cluster."""
