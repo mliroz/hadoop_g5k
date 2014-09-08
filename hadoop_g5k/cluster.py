@@ -21,10 +21,10 @@ CORE_CONF_FILE = "core-site.xml"
 HDFS_CONF_FILE = "hdfs-site.xml"
 MR_CONF_FILE = "mapred-site.xml"
 
-DEFAULT_HADOOP_BASE_DIR = "/opt/base/hadoop"
+DEFAULT_HADOOP_BASE_DIR = "/tmp/hadoop"
 DEFAULT_HADOOP_CONF_DIR = DEFAULT_HADOOP_BASE_DIR + "/conf"
-DEFAULT_HADOOP_LOGS_DIR = "/opt/base/logs/hadoop"
-DEFAULT_HADOOP_TEMP_DIR = "/tmp/" + getpass.getuser() + "_hadoop/"
+DEFAULT_HADOOP_LOGS_DIR = DEFAULT_HADOOP_BASE_DIR + "/logs"
+DEFAULT_HADOOP_TEMP_DIR = DEFAULT_HADOOP_BASE_DIR + "/tmp"
 
 DEFAULT_HADOOP_HDFS_PORT = 54310
 DEFAULT_HADOOP_MR_PORT = 54311
@@ -271,6 +271,55 @@ class HadoopCluster(object):
                     ", hosts " + str(self.hosts) + " and topology " +
                     str(self.topology))
 
+    def bootstrap(self, hadoop_tar_file):
+        """Install hadoop in all cluster nodes from the specified tar.gz file.
+        
+        Args:
+          hadoop_tar_file (str): The file containing hadoop binaries.
+        """
+        
+        # 1. Remove used dirs if existing
+        action = Remote("rm -rf " + self.hadoop_base_dir, self.hosts)
+        action.run()         
+        action = Remote("rm -rf " + self.hadoop_conf_dir, self.hosts)
+        action.run()               
+        action = Remote("rm -rf " + self.hadoop_logs_dir, self.hosts)
+        action.run()
+        action = Remote("rm -rf " + self.hadoop_temp_dir, self.hosts)
+        action.run()                
+        
+        # 1. Copy hadoop tar file and uncompress
+        logger.info("Copy " + hadoop_tar_file + " to hosts and uncompress")
+        action = TaktukPut(self.hosts, [ hadoop_tar_file ], "/tmp")
+        action.run()
+        action = Remote("tar xf /tmp/" + hadoop_tar_file + " -C /tmp", self.hosts)
+        action.run()
+        
+        # 2. Move installation to base dir
+        logger.info("Create installation directories")    
+        action = Remote("mv /tmp/" + hadoop_tar_file.replace(".tar.gz","") + " " + self.hadoop_base_dir, self.hosts)
+        action.run()  
+        
+        # 3 Create other dirs        
+        action = Remote("mkdir -p " + self.hadoop_conf_dir, self.hosts)
+        action.run()
+        
+        action = Remote("mkdir -p " + self.hadoop_logs_dir, self.hosts)
+        action.run()
+        
+        action = Remote("mkdir -p " + self.hadoop_temp_dir, self.hosts)
+        action.run()               
+        
+        # 4. Specify environment variables
+        command = "cat >> " + self.hadoop_conf_dir + "/hadoop-env.sh << EOF\n"
+        #TODO: is there a way to obtain JAVA_HOME automatically?
+        command += "export JAVA_HOME=/usr/lib/jvm/java-7-openjdk-amd64\n" 
+        command += "export HADOOP_LOG_DIR=" + self.hadoop_logs_dir + "\n"
+        command += "HADOOP_HOME_WARN_SUPPRESS=\"TRUE\"\n"
+        command += "EOF"
+        action = Remote(command, self.hosts)
+        action.run()
+        
 
     def initialize(self):
         """Initialize the cluster: copy base configuration and format DFS."""

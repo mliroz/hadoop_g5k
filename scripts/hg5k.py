@@ -180,7 +180,13 @@ if __name__ == "__main__":
                         nargs=1,
                         action="store",
                         help="File containing the properties to be used (INI file). Applies only to --create")
-                              
+                        
+    object_group.add_argument("--bootstrap",
+                              metavar="HADOOP_TAR",
+                              nargs=1,
+                              action="store",
+                              help="Install hadoop in the cluster nodes taking into account the specified properties.\n"
+                                   "HADOOP_TAR defines the path of the .tar.gz file containing hadoop binaries.")
                               
     actions = parser.add_argument_group(style.host("Hadoop actions"), 
         "Actions to execute in the hadoop cluster. Several options can be indicated at the same time.\n" +
@@ -318,6 +324,10 @@ if __name__ == "__main__":
     else:
         # Deserialize
         hc = deserialize_hcluster(hc_file_name)
+        
+    # Execute options
+    if args.bootstrap:
+        hc.bootstrap(args.bootstrap[0])        
 
     # Execute options
     if args.initialize:
