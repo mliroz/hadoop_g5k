@@ -29,8 +29,7 @@ DEFAULT_HADOOP_TEMP_DIR = DEFAULT_HADOOP_BASE_DIR + "/tmp"
 DEFAULT_HADOOP_HDFS_PORT = 54310
 DEFAULT_HADOOP_MR_PORT = 54311
 
-DEFAULT_HADOOP_LOCAL_CONF_DIR = "/home/" + getpass.getuser() + \
-                                "/common/hadoop/conf"
+DEFAULT_HADOOP_LOCAL_CONF_DIR = "conf"
 
 class HadoopException(Exception): pass
 class HadoopNotInitializedException(HadoopException): pass
@@ -337,20 +336,38 @@ class HadoopCluster(object):
 
         # Copy base configuration files to tmp dir
         self.conf_dir = tempfile.mkdtemp("","hadoop-","/tmp")
-        baseConfFiles = [ os.path.join(self.local_base_conf_dir,f) 
+        if os.path.exists(self.local_base_conf_dir):
+            base_conf_files = [ os.path.join(self.local_base_conf_dir,f) 
                           for f in os.listdir(self.local_base_conf_dir) ]
-        for f in baseConfFiles:
-            shutil.copy(f,self.conf_dir)
+            for f in base_conf_files:
+                shutil.copy(f,self.conf_dir)                          
+        else:
+            logger.warn("Local conf dir does not exist. Using default configuration")
+            base_conf_files = []          
+        
+        mandatory_files = [ CORE_CONF_FILE, HDFS_CONF_FILE, MR_CONF_FILE ]
+                
+        missing_conf_files = mandatory_files
+        for f in base_conf_files:
+            missing_conf_files.remove(os.path.basename(f))
+            
+        logger.info("Copying missing conf files from master: " + str(missing_conf_files))
+            
+        remote_missing_files = [ os.path.join(self.hadoop_conf_dir, f)
+                                    for f in missing_conf_files ]
+
+        action = Get([self.master], remote_missing_files, self.conf_dir)
+        action.run()
 
         # Create master and slaves configuration files
-        masterFile = open(self.conf_dir + "/masters", "w")
-        masterFile.write(self.master.address + "\n")
-        masterFile.close()
+        master_file = open(self.conf_dir + "/masters", "w")
+        master_file.write(self.master.address + "\n")
+        master_file.close()
 
-        slavesFile = open(self.conf_dir + "/slaves", "w")
+        slaves_file = open(self.conf_dir + "/slaves", "w")
         for s in self.hosts:
-            slavesFile.write(s.address + "\n")
-        slavesFile.close()
+            slaves_file.write(s.address + "\n")
+        slaves_file.close()
 
         # Create topology files
         self.topology.create_files(self.conf_dir)
@@ -439,14 +456,19 @@ class HadoopCluster(object):
         """
 
         # Copy conf files from master
-        remoteConfFiles = [ os.path.join(self.hadoop_conf_dir, f) 
-            for f in os.listdir(self.local_base_conf_dir) if f.endswith(".xml")]
+        action = Remote("ls " + self.hadoop_conf_dir + "/*.xml", [self.master])
+        action.run()
+        output = action.processes[0].stdout
+        
+        remote_conf_files = []
+        for f in output.split():
+            remote_conf_files.append(os.path.join(self.hadoop_conf_dir, f))
 
         tmp_dir = "/tmp/mliroz_temp_hadoop/"
         if not os.path.exists(tmp_dir):
             os.makedirs(tmp_dir)
 
-        action = Get([self.master], remoteConfFiles, tmp_dir)
+        action = Get([self.master], remote_conf_files, tmp_dir)
         action.run()
 
         # Do replacements in temp file
