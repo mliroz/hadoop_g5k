@@ -11,10 +11,12 @@ import sys
 import tempfile
 import ConfigParser
 
-from execo.action import Put, TaktukPut, Get, Remote
+from execo.action import Put, TaktukRemote, TaktukPut, Get, Remote, SequentialActions, \
+    ChainPut
 from execo.process import SshProcess
 from execo_engine import logger
-from execo_g5k.api_utils import get_host_attributes
+from execo_g5k.api_utils import get_host_attributes, canonical_host_name
+from execo_g5k.topology import g5k_graph
 
 # Constant definitions
 CORE_CONF_FILE = "core-site.xml"
@@ -57,14 +59,8 @@ class HadoopTopology(object):
                 logger.warn("hosts and topology have not the same length.")
 
         logger.info("Discovering topology automatically")
-        self.topology = {}
-        for h in hosts:
-            nw_adapters = get_host_attributes(h)[u'network_adapters']
-            for nwa in nw_adapters:
-                if (u'network_address' in nwa and 
-                        nwa[u'network_address'] == h.address):
-                    self.topology[h] = "/" + nwa[u'switch']
-                    break
+        G5K = g5k_graph()
+        self.topology = G5K.hadoop_topology(hosts)
                     
 
     def get_rack(self, host):
@@ -77,7 +73,9 @@ class HadoopTopology(object):
           str: The rack corresponding to the given host.
           
         """
-
+        if 'kavlan' in host.address:
+            host = canonical_host_name(host)
+        print self.topology
         return self.topology[host]
 
 
@@ -251,13 +249,13 @@ class HadoopCluster(object):
         if configFile:
             config.readfp(open(configFile))
 
-        self.hadoop_base_dir = config.get("cluster","hadoop_base_dir")
-        self.hadoop_conf_dir = config.get("cluster","hadoop_conf_dir")
-        self.hadoop_logs_dir = config.get("cluster","hadoop_logs_dir")
-        self.hadoop_temp_dir = config.get("cluster","hadoop_temp_dir")
-        self.hdfs_port = config.getint("cluster","hdfs_port")
-        self.mapred_port = config.getint("cluster","mapred_port")
-        self.local_base_conf_dir = config.get("local","local_base_conf_dir")
+        self.hadoop_base_dir = config.get("cluster", "hadoop_base_dir")
+        self.hadoop_conf_dir = config.get("cluster", "hadoop_conf_dir")
+        self.hadoop_logs_dir = config.get("cluster", "hadoop_logs_dir")
+        self.hadoop_temp_dir = config.get("cluster", "hadoop_temp_dir")
+        self.hdfs_port = config.getint("cluster", "hdfs_port")
+        self.mapred_port = config.getint("cluster", "mapred_port")
+        self.local_base_conf_dir = config.get("local", "local_base_conf_dir")
 
         # Configure master and slaves
         self.hosts = hosts
@@ -277,37 +275,46 @@ class HadoopCluster(object):
           hadoop_tar_file (str): The file containing hadoop binaries.
         """
         
+        # 0. Check that required packages are present
+        required_packages = "openjdk-7-jre openjdk-7-jdk"
+        check_packages = TaktukRemote("dpkg -s " + required_packages,
+                                     self.hosts)
+        for p in check_packages.processes:
+            p.nolog_exit_code = p.nolog_error = True
+        check_packages.run()
+        if not check_packages.ok:
+            logger.info('Packages not installed, trying to install')
+            install_packages = TaktukRemote("export DEBIAN_MASTER=noninteractive ; " + \
+                "apt-get update && apt-get install -y --force-yes " + \
+                required_packages, self.hosts).run()
+            if not install_packages.ok:
+                logger.error("Unable to install the packages")
+        logger.info('All required packages are present, cleaning hadoop installation ' + \
+                    'directory')
         # 1. Remove used dirs if existing
-        action = Remote("rm -rf " + self.hadoop_base_dir, self.hosts)
-        action.run()         
-        action = Remote("rm -rf " + self.hadoop_conf_dir, self.hosts)
-        action.run()               
-        action = Remote("rm -rf " + self.hadoop_logs_dir, self.hosts)
-        action.run()
-        action = Remote("rm -rf " + self.hadoop_temp_dir, self.hosts)
-        action.run()                
         
-        # 1. Copy hadoop tar file and uncompress
+        
+        
+        # 2. Copy hadoop tar file and uncompress
         logger.info("Copy " + hadoop_tar_file + " to hosts and uncompress")
-        action = TaktukPut(self.hosts, [ hadoop_tar_file ], "/tmp")
-        action.run()
-        action = Remote("tar xf /tmp/" + os.path.basename(hadoop_tar_file) + " -C /tmp", self.hosts)
-        action.run()
+        rm_files = TaktukRemote("rm -rf " + self.hadoop_base_dir + 
+                                " " + self.hadoop_conf_dir +
+                                " " + self.hadoop_logs_dir +
+                                " " + self.hadoop_temp_dir,
+                                    self.hosts)
+        put_tar = ChainPut(self.hosts, [hadoop_tar_file], "/tmp")
+        tar_xf = TaktukRemote("tar xf /tmp/" + os.path.basename(hadoop_tar_file) + " -C /tmp", self.hosts)
+        SequentialActions([rm_files, put_tar, tar_xf]).run()
         
         # 2. Move installation to base dir
-        logger.info("Create installation directories")    
-        action = Remote("mv /tmp/" + os.path.basename(hadoop_tar_file).replace(".tar.gz","") + " " + self.hadoop_base_dir, self.hosts)
-        action.run()  
-        
-        # 3 Create other dirs        
-        action = Remote("mkdir -p " + self.hadoop_conf_dir, self.hosts)
-        action.run()
-        
-        action = Remote("mkdir -p " + self.hadoop_logs_dir, self.hosts)
-        action.run()
-        
-        action = Remote("mkdir -p " + self.hadoop_temp_dir, self.hosts)
-        action.run()               
+        logger.info("Create hadoop directories")    
+        mkdirs = TaktukRemote(
+                "mv /tmp/" + os.path.basename(hadoop_tar_file).replace(".tar.gz","") +
+                " " + self.hadoop_base_dir + 
+                " && mkdir -p " + self.hadoop_conf_dir +
+                " && mkdir -p " + self.hadoop_logs_dir + 
+                " && mkdir -p " + self.hadoop_temp_dir, self.hosts) 
+        mkdirs.run()               
         
         # 4. Specify environment variables
         command = "cat >> " + self.hadoop_conf_dir + "/hadoop-env.sh << EOF\n"
