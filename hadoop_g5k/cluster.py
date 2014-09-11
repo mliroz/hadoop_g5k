@@ -75,7 +75,7 @@ class HadoopTopology(object):
         """
         if 'kavlan' in host.address:
             host = canonical_host_name(host)
-        print self.topology
+
         return self.topology[host]
 
 
