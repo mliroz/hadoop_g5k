@@ -14,6 +14,7 @@ from execo.action import Get, Put
 from execo.log import style
 from execo.process import SshProcess
 from execo_engine import logger
+from execo_g5k import get_oar_job_nodes, get_oargrid_job_nodes
 
 __user_login = getpass.getuser()
 
@@ -97,13 +98,14 @@ if __name__ == "__main__":
             return highest_id + 1
 
 
-    def __generate_hosts(file_name):
+    def __generate_hosts(element):
         """Generate a list of hosts from the given file.
         
         Args:
-          file_name: The path of the file containing the hosts to be used. Each
-            host should be in a different line. Repeated hosts are pruned.
-            Hint: in Grid5000 $OAR_NODEFILE should be used.
+          element: The source of the hosts. Can be the path of the file containing 
+            the hosts to be used (each host should be in a different line, repeated hosts are pruned),
+            a oargrid_job_id or a comma separated list of site:oar_job_id
+            Hint: in Grid5000 $OAR_NODEFILE can be used.
         
         Return:
           list of Host: The list of hosts.
@@ -111,12 +113,26 @@ if __name__ == "__main__":
 
         hosts = []
 
-        for line in open(file_name):
-            h = Host(line.rstrip())
-            if not h in hosts:
-                hosts.append(h)
+        if os.path.isfile(element):
+            # generate hosts from a file
+            for line in open(element):
+                h = Host(line.rstrip())
+                if not h in hosts:
+                    hosts.append(h)
+        elif ':' in element:
+            for oar_job in element.split(','):
+                frontend, job_id = oar_job.split(':')
+                hosts += get_oar_job_nodes(job_id, frontend)
+        elif element.isdigit():
 
-        return hosts        
+            hosts = get_oargrid_job_nodes(element)
+        else:
+            logger.error('Unable to generate host list from %s', element)
+
+
+        return hosts
+
+
 
 
     # Main #######################################################################
@@ -413,7 +429,8 @@ if __name__ == "__main__":
             logger.info(style.user2("Hadoop Cluster with ID " + str(id)))
             logger.info(style.user1("    Version: ") + hc.get_version())
             logger.info(style.user1("    Master: ") + str(hc.master))
-            logger.info(style.user1("    Hosts: ") + str(hc.hosts))
+            logger.info(style.user1("    Hosts: ") + ' '.join(map(lambda h: h.address,
+                                                             hc.hosts)))
             logger.info(style.user1("    Topology: "))
             for h in hc.hosts:
                 logger.info("        " + str(h) + " -> " + str(hc.topology.get_rack(h)))
