@@ -75,8 +75,11 @@ class HadoopTopology(object):
         """
         if 'kavlan' in host.address:
             host = canonical_host_name(host)
-
-        return self.topology[host]
+        if host in self.topology:
+            return self.topology[host]
+        else:
+            logger.detail('No rack found')
+            return 'default_rack'
 
 
     def __str__(self):
