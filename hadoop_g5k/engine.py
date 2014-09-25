@@ -11,7 +11,7 @@ from hadoop_g5k import HadoopCluster, HadoopJarJob
 
 from execo.action import Get, Remote
 from execo.process import SshProcess
-from execo.time_utils import timedelta_to_seconds, format_date
+from execo.time_utils import timedelta_to_seconds, format_date, get_seconds
 from execo_g5k import get_cluster_site, get_oar_job_info, oardel, oarsub, \
     get_planning, compute_slots, get_jobs_specs, get_oar_job_nodes, \
     deploy, Deployment, get_current_oar_jobs
@@ -517,23 +517,31 @@ class HadoopEngine(Engine):
         """Perform a reservation of the required number of nodes."""
 
         logger.info('Performing reservation')
-        starttime = int(time.time() + timedelta_to_seconds(datetime.timedelta(minutes=1)))
+        now = int(time.time() + timedelta_to_seconds(datetime.timedelta(minutes=1)))
+        starttime = now
         endtime = int(starttime + timedelta_to_seconds(datetime.timedelta(days=3,
                                                                  minutes=1)))
         startdate, n_nodes = self._get_nodes(starttime, endtime)
+        
+        search_time = 3 * 24 * 60 * 60 # 3 days
+        walltime_seconds = get_seconds(self.options.walltime)
+        
+        iteration = 0
         while not n_nodes:
+            iteration += 1
             logger.info('Not enough nodes found between %s and %s, ' + \
                         'increasing time window',
                         format_date(starttime), format_date(endtime))
-            starttime = endtime
-            endtime = int(starttime + timedelta_to_seconds(datetime.timedelta(days=3,
-                                                                minutes=1)))
+            starttime = max(now, now + iteration * search_time - walltime_seconds)
+            endtime = int(now + (iteration + 1) * search_time)
+            
             startdate, n_nodes = self._get_nodes(starttime, endtime)
             if starttime > int(time.time() + timedelta_to_seconds(
                                             datetime.timedelta(weeks=6))):
                 logger.error('There are not enough nodes on %s for your ' + \
                              'experiments, abort ...', self.cluster)
                 exit()
+                
         jobs_specs = get_jobs_specs({self.cluster: n_nodes},
                                     name=self.__class__.__name__)
         sub = jobs_specs[0][0]
