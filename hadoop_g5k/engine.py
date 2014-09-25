@@ -26,7 +26,7 @@ class ParameterException(HadoopEngineException): pass
 class MacroException(ParameterException): pass
 
 class MacroManager(object):
-    
+        
     def __init__(self):
         """Crate a new MacroManager object."""
     
@@ -210,7 +210,7 @@ class MacroManager(object):
 
 class HadoopEngine(Engine):
     """This class manages thw whole workflow of a hadoop test suite."""
-
+    
     def __init__(self):
         self.frontend = None
         super(HadoopEngine, self).__init__()
@@ -254,6 +254,10 @@ class HadoopEngine(Engine):
         
         self.hadoop_props = None
         
+        # TODO - should be specified in conf file
+        self.use_kadeploy = False        
+        self.kadeploy_environment = "/home/mliroz/deploys/hadoop6.env"
+        self.hadoop_tar_file = "/home/mliroz/deploys/hadoop-1.0.4.tar.gz"
 
     def run(self):
         """Inherited method, put here the code for running the engine"""
@@ -274,10 +278,6 @@ class HadoopEngine(Engine):
         else:
             self.oar_job_id = None
 
-        # TODO: Provisional
-        #(self.oar_job_id, self.frontend) = get_current_oar_jobs(frontends=["lyon"])[0]
-        self.oar_job_id = get_current_oar_jobs()[0][0]
-
         # Main
         try:
             # Creation of the main iterator which is used for the first control loop.
@@ -290,14 +290,13 @@ class HadoopEngine(Engine):
                 
                 ## SETUP
                 # If no job, we make a reservation and prepare the hosts for the experiments
-                #if job_is_dead or self.oar_job_id is None:
-                #    self.make_reservation()
-                self.hosts = get_oar_job_nodes(self.oar_job_id, self.frontend)
-                (deployed, undeployed) = self.deploy_nodes()
-                if len(deployed) == 0:
-                    break
-                #else:
-                #    self.hosts = get_oar_job_nodes(self.oar_job_id, self.frontend)
+                if job_is_dead or self.oar_job_id is None:
+                    self.make_reservation()
+                    success = self.setup()
+                    if not success:
+                        break
+                else:
+                    self.hosts = get_oar_job_nodes(self.oar_job_id, self.frontend)
                 if not self.hc:
                     self.hc = HadoopCluster(self.hosts)
                 ## SETUP FINISHED
@@ -329,8 +328,8 @@ class HadoopEngine(Engine):
             if self.oar_job_id is not None:
                 if not self.options.keep_alive:
                     pass
-                    #logger.info('Deleting job')
-                    #oardel([(self.oar_job_id, self.frontend)])
+                    logger.info('Deleting job')
+                    oardel([(self.oar_job_id, self.frontend)])
                 else:
                     logger.info('Keeping job alive for debugging')
                     
@@ -539,7 +538,10 @@ class HadoopEngine(Engine):
                                     name=self.__class__.__name__)
         sub = jobs_specs[0][0]
         sub.walltime = self.options.walltime
-        sub.additional_options = '-t deploy'
+        if self.use_kadeploy:
+            sub.additional_options = '-t deploy'
+        else:
+            sub.additional_options = '-t allow_classic_ssh'
         sub.reservation_date = startdate
         (self.oar_job_id, self.frontend) = oarsub(jobs_specs)[0]
         logger.info('Startdate: %s, n_nodes: %s', format_date(startdate),
@@ -564,6 +566,22 @@ class HadoopEngine(Engine):
                 return False, False
         return startdate, self.n_nodes
     
+    def setup(self):
+        """Setup the cluster of hosts. Depending on the enginer parameters it
+        will bootstrap hadoop directly or deploy a given environment.
+        """
+        
+        self.hosts = get_oar_job_nodes(self.oar_job_id, self.frontend)
+        
+        if self.use_kadeploy:
+            (deployed, undeployed) = self.deploy_nodes()
+            return (len(deployed) != 0)
+        else:
+            if not self.hc:
+                self.hc = HadoopCluster(self.hosts)        
+            self.hc.bootstrap(self.hadoop_tar_file)
+            return True
+        
     
     def deploy_nodes(self, min_deployed_hosts = 1, max_tries = 3):
         """Deploy nodes in the cluster. If the number of deployed nodes is less
@@ -584,10 +602,10 @@ class HadoopEngine(Engine):
         
         (deployed, undeployed) = deploy(
             Deployment(self.hosts, 
-            env_file = "/home/mliroz/deploys/hadoop6.env"),
+            env_file = self.kadeploy_environment),
             num_tries = max_tries,
             check_enough_func = correct_deployment,
-            out=True
+            out = True
         )
             
         logger.info("%i deployed, %i undeployed" % (len(deployed), 
