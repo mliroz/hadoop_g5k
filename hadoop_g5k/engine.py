@@ -254,10 +254,10 @@ class HadoopEngine(Engine):
         
         self.hadoop_props = None
         
-        # TODO - should be specified in conf file
-        self.use_kadeploy = False        
-        self.kadeploy_environment = "/home/mliroz/deploys/hadoop6.env"
-        self.hadoop_tar_file = "/home/mliroz/deploys/hadoop-1.0.4.tar.gz"
+        self.use_kadeploy = False
+        self.kadeploy_env_file = None        
+        self.kadeploy_env_name = None        
+        
 
     def run(self):
         """Inherited method, put here the code for running the engine"""
@@ -393,6 +393,25 @@ class HadoopEngine(Engine):
                 if not os.path.exists(self.hadoop_props):
                     logger.error("Hadoop properties file " + self.hadoop_props + " does not exist")
                     raise ParameterException("Hadoop properties file " + self.hadoop_props + " does not exist")
+                
+            if "test.use_kadeploy" in test_parameters_names:
+                self.use_kadeploy = config.getboolean("test_parameters", "test.use_kadeploy")
+            
+            if self.use_kadeploy:
+                if "test.kadeploy.env_file" in test_parameters_names:
+                    self.kadeploy_env_file = config.get("test_parameters", "test.kadeploy.env_file")
+                elif "test.kadeploy.env_name" in test_parameters_names:
+                    self.kadeploy_env_name = config.get("test_parameters", "test.kadeploy.env_name")                
+                else:
+                    logger.error("Either test.kadeploy.env_file or test.kadeploy.env_name should be specified")
+                    raise ParameterException("Either test.kadeploy.env_file or test.kadeploy.env_name should be specified")
+            else:
+                if "test.hadoop.tar_file" in test_parameters_names:
+                    self.hadoop_tar_file = bool(config.get("test_parameters", "test.hadoop.tar_file"))
+                else:
+                    logger.error("test.hadoop.tar_file should be specified")
+                    raise ParameterException("test.hadoop.tar_file should be specified")                    
+                    
         
         # DATASET PARAMETERS
         ds_parameters_names = config.options("ds_parameters")        
@@ -552,8 +571,8 @@ class HadoopEngine(Engine):
             sub.additional_options = '-t allow_classic_ssh'
         sub.reservation_date = startdate
         (self.oar_job_id, self.frontend) = oarsub(jobs_specs)[0]
-        logger.info('Startdate: %s, n_nodes: %s', format_date(startdate),
-                    str(n_nodes))
+        logger.info('Startdate: %s, n_nodes: %s, job_id: %s', format_date(startdate),
+                    str(n_nodes), str(self.oar_job_id))
                     
     def _get_nodes(self, starttime, endtime):
         
@@ -608,9 +627,16 @@ class HadoopEngine(Engine):
         def correct_deployment(deployed, undeployed):
             return len(deployed) >= min_deployed_hosts
         
+        if self.kadeploy_env_file:
+            deployment = Deployment(self.hosts, env_file = self.kadeploy_env_file)
+        elif self.kadeploy_env_name:
+            deployment = Deployment(self.hosts, env_name = self.kadeploy_env_name)
+        else:
+            logger.error("Neither env_file nor env_name are specified")
+            raise ParameterException("Neither env_file nor env_name are specified")
+        
         (deployed, undeployed) = deploy(
-            Deployment(self.hosts, 
-            env_file = self.kadeploy_environment),
+            deployment,
             num_tries = max_tries,
             check_enough_func = correct_deployment,
             out = True
