@@ -4,13 +4,14 @@ import getpass
 import os
 import pickle
 import sys
+import threading
 
 from hadoop_g5k import HadoopCluster, HadoopJarJob
 
 from argparse import ArgumentParser, RawTextHelpFormatter
 
 from execo import Host
-from execo.action import Get, Put
+from execo.action import Get, Put, TaktukRemote
 from execo.log import style
 from execo.process import SshProcess
 from execo_engine import logger
@@ -146,7 +147,13 @@ if __name__ == "__main__":
                         nargs=1,
                         metavar="NODE",
                         help="Node where the action will be executed. Applies only to --execute and --jarjob")
-
+                        
+    actions.add_argument("--libjars",
+                        action="store",
+                        nargs="+",
+                        metavar="LIB_JARS",
+                        help="A list of libraries to be used in job execution. Applies only to --jarjob")
+                        
     verbose_group = actions.add_mutually_exclusive_group()
 
     verbose_group.add_argument("-v", "--verbose",
@@ -174,6 +181,12 @@ if __name__ == "__main__":
                               dest="delete",
                               action="store_true",
                               help="Remove all files used by the cluster")
+                              
+    object_group.add_argument("--version",
+                        dest="version",
+                        nargs=1,
+                        action="store",
+                        help="Hadoop version to be used.")                              
                               
     object_group.add_argument("--properties",
                         dest="properties",
@@ -208,12 +221,12 @@ if __name__ == "__main__":
                         dest="start",
                         action="store_true",
                         help="Start the namenode and jobtracker")                        
-                        
+                                               
     actions.add_argument("--putindfs",
                         action="store",
-                        nargs=2,
-                        metavar=("LOCAL_PATH","DFS_PATH"),
-                        help="Copy a local path into the remote path in dfs")
+                        nargs="+",
+                        metavar=("PATH"),
+                        help="Copy a set of local paths into the remote path in dfs")                        
                         
     actions.add_argument("--getfromdfs",
                         action="store",
@@ -302,11 +315,23 @@ if __name__ == "__main__":
             sys.exit(1)
 
         hosts = __generate_hosts(args.create[0])
-
-        if args.properties:
-            hc = HadoopCluster(hosts, None, args.properties[0])
+        
+        if args.version:
+            if args.version[0].startswith("0."):
+                hadoop_class = HadoopCluster
+            elif args.version[0].startswith("1."):
+                hadoop_class = HadoopCluster
+            elif args.version[0].startswith("2."):
+                logger.error("Clusetr for HadoopV2 not implemented yet")
+            else:
+                logger.error("Unknown hadoop version")
         else:
-            hc = HadoopCluster(hosts)
+            hadoop_class = HadoopCluster
+        
+        if args.properties:
+            hc = hadoop_class(hosts, None, args.properties[0])
+        else:
+            hc = hadoop_class(hosts)
 
     elif args.delete:
 
@@ -345,20 +370,49 @@ if __name__ == "__main__":
         hc.start_and_wait()
         
     if args.putindfs:
-        local_path = args.putindfs[0]
-        remote_path = args.putindfs[1]
+        local_paths = args.putindfs[:-1]
+        dest = args.putindfs[-1]
+                
+        for f in local_paths:
+            if not os.path.exists(f):
+                logger.error("Local path " + f + " does not exist")
+                sys.exit(4)
+                
+        # Define and create temp dir
+        tmp_dir = "/tmp" + dest
+        hosts = hc.hosts        
+        actionRemove = TaktukRemote("rm -rf " + tmp_dir, hosts)
+        actionRemove.run()
+        actionCreate = TaktukRemote("mkdir -p " + tmp_dir, hosts)
+        actionCreate.run()
         
-        if not os.path.exists(local_path):
-            logger.error("Local path " + local_path + " does not exist")
-            sys.exit(4)
-        
-        # Copy files to master
-        tmp_dir = "/tmp"
-        action = Put([ hc.master ], [ local_path] , tmp_dir)
-        action.run()
-        
-        # Load to dfs
-        hc.execute("fs -put " + os.path.join(tmp_dir,os.path.basename(local_path)) + " " + remote_path + "/" + os.path.basename(local_path), verbose = False)
+        def copy_function(host, files_to_copy):
+            action = Put([ host ], files_to_copy, tmp_dir)
+            action.run()
+            
+            for f in files_to_copy:
+                src_file = os.path.join(tmp_dir, os.path.basename(f))
+            
+                hc.execute("fs -put " + src_file + " " + os.path.join(dest, os.path.basename(src_file)), host, True, False)                
+                
+        # Assign files to hosts  
+        files_per_host = [[]] * len(hosts)
+        for idx in range(0,len(hosts)):
+            files_per_host[idx] = local_paths[idx::len(hosts)]
+            
+        # Create threads and launch them
+        logger.info("Copying files in parallel into " + str(len(hosts)) + " hosts")
+                
+        threads = []
+        for idx, h in enumerate(hosts):
+            if files_per_host[idx]:
+                t = threading.Thread(target = copy_function, args = (h, files_per_host[idx]))
+                t.start()
+                threads.append(t)
+
+        # Wait for the threads to finish
+        for t in threads:
+            t.join()
     
     if args.getfromdfs:
         remote_path = args.getfromdfs[0]        
@@ -384,12 +438,15 @@ if __name__ == "__main__":
 
     if args.jarjob:
         if len(args.jarjob) > 1:
-            if node_host:
-                hc.execute_jar(HadoopJarJob(args.jarjob[0], args.jarjob[1:]),
-                               node = node_host, verbose = verbose)
+            if not node_host:
+                node_host = None
+            if args.libjars:
+                libjars = args.libjars
             else:
-                hc.execute_jar(HadoopJarJob(args.jarjob[0], args.jarjob[1:]),
-                               verbose = verbose)
+                libjars = None
+                           
+            hc.execute_jar(HadoopJarJob(args.jarjob[0], args.jarjob[1:], libjars),
+                               node = node_host, verbose = verbose)
         else:
             if node_host:
                 hc.execute_jar(HadoopJarJob(args.jarjob[0]), node = node_host,

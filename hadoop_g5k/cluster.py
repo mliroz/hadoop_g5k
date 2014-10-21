@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 """hadoop_g5k: Hadoop cluster management in Grid5000."""
 
 import getpass
@@ -147,7 +145,7 @@ class HadoopJarJob(object):
             params = []
         if not lib_paths:
             lib_paths = []
-            
+                        
         # Check if the jar file exists
         if not os.path.exists(jar_path):
             logger.error("Jar file " + jar_path + " does not exist")
@@ -182,7 +180,7 @@ class HadoopJarJob(object):
             libs_param = " -libjars "
             for lp in self.lib_paths:
                 libs_param += os.path.join(exec_dir, os.path.basename(lp)) + ","
-                libs_param[:-1]
+            libs_param = libs_param[:-1]
         else:
             libs_param = ""
 
@@ -221,6 +219,18 @@ class HadoopCluster(object):
     running = False
     running_dfs = False
     running_map_reduce = False
+    
+    # Default properties
+    defaults = {
+        "hadoop_base_dir" : DEFAULT_HADOOP_BASE_DIR,
+        "hadoop_conf_dir" : DEFAULT_HADOOP_CONF_DIR,
+        "hadoop_logs_dir" : DEFAULT_HADOOP_LOGS_DIR,
+        "hadoop_temp_dir" : DEFAULT_HADOOP_TEMP_DIR,
+        "hdfs_port" : str(DEFAULT_HADOOP_HDFS_PORT),
+        "mapred_port" : str(DEFAULT_HADOOP_MR_PORT),
+
+        "local_base_conf_dir" : DEFAULT_HADOOP_LOCAL_CONF_DIR
+    }
 
     def __init__(self, hosts, topo_list = None, configFile = None):
         """Create a new Hadoop cluster with the given hosts and topology.
@@ -234,20 +244,10 @@ class HadoopCluster(object):
         """
 
         # Load cluster properties
-        defaults = {
-            "hadoop_base_dir" : DEFAULT_HADOOP_BASE_DIR,
-            "hadoop_conf_dir" : DEFAULT_HADOOP_CONF_DIR,
-            "hadoop_logs_dir" : DEFAULT_HADOOP_LOGS_DIR,
-            "hadoop_temp_dir" : DEFAULT_HADOOP_TEMP_DIR,
-            "hdfs_port" : str(DEFAULT_HADOOP_HDFS_PORT),
-            "mapred_port" : str(DEFAULT_HADOOP_MR_PORT),
-
-            "local_base_conf_dir" : DEFAULT_HADOOP_LOCAL_CONF_DIR
-        }
-        config = ConfigParser.ConfigParser(defaults)
+        config = ConfigParser.ConfigParser(self.defaults)
         config.add_section("cluster")
         config.add_section("local")
-
+        
         if configFile:
             config.readfp(open(configFile))
 
@@ -258,6 +258,9 @@ class HadoopCluster(object):
         self.hdfs_port = config.getint("cluster","hdfs_port")
         self.mapred_port = config.getint("cluster","mapred_port")
         self.local_base_conf_dir = config.get("local","local_base_conf_dir")
+        
+        self.hadoop_bin_dir = self.hadoop_base_dir + "/bin"
+        self.hadoop_sbin_dir = self.hadoop_base_dir + "/bin"
 
         # Configure master and slaves
         self.hosts = hosts
@@ -349,7 +352,9 @@ class HadoopCluster(object):
                 
         missing_conf_files = mandatory_files
         for f in base_conf_files:
-            missing_conf_files.remove(os.path.basename(f))
+            f_base_name = os.path.basename(f)
+            if f_base_name in missing_conf_files:
+                missing_conf_files.remove(f_base_name)
             
         logger.info("Copying missing conf files from master: " + str(missing_conf_files))
             
@@ -552,7 +557,7 @@ class HadoopCluster(object):
 
         logger.info("Formatting HDFS")
 
-        proc = SshProcess(self.hadoop_base_dir + "/bin/hadoop namenode -format",
+        proc = SshProcess(self.hadoop_bin_dir + "/hadoop namenode -format",
                           self.master)
         proc.run()
 
@@ -594,7 +599,7 @@ class HadoopCluster(object):
           logger.warn("Dfs was already started")
           return
 
-        proc = SshProcess(self.hadoop_base_dir + "/bin/start-dfs.sh", 
+        proc = SshProcess(self.hadoop_sbin_dir + "/start-dfs.sh", 
                           self.master)
         proc.run()
 
@@ -611,7 +616,7 @@ class HadoopCluster(object):
         self.start_dfs()
 
         logger.info("Waiting for safe mode to be off")
-        proc = SshProcess(self.hadoop_base_dir + "/bin/hadoop dfsadmin -safemode wait",
+        proc = SshProcess(self.hadoop_bin_dir + "/hadoop dfsadmin -safemode wait",
                           self.master)
         proc.run()
 
@@ -629,10 +634,10 @@ class HadoopCluster(object):
         logger.info("Starting MapReduce")
         
         if self.running_map_reduce:
-          logger.warn("Mapred was already started")
+          logger.warn("Error while starting MapReduce")
           return        
 
-        proc = SshProcess(self.hadoop_base_dir + "/bin/start-mapred.sh",
+        proc = SshProcess(self.hadoop_sbin_dir + "/start-mapred.sh",
                           self.master)
         proc.run()
 
@@ -674,7 +679,7 @@ class HadoopCluster(object):
 
         logger.info("Stopping HDFS")
 
-        proc = SshProcess(self.hadoop_base_dir + "/bin/stop-dfs.sh",
+        proc = SshProcess(self.hadoop_sbin_dir + "/stop-dfs.sh",
                           self.master)
         proc.run()
         
@@ -691,7 +696,7 @@ class HadoopCluster(object):
 
         logger.info("Stopping MapReduce")
 
-        proc = SshProcess(self.hadoop_base_dir + "/bin/stop-mapred.sh",
+        proc = SshProcess(self.hadoop_sbin_dir + "/stop-mapred.sh",
                           self.master)
         proc.run()
         
@@ -740,10 +745,10 @@ class HadoopCluster(object):
             node = self.master
             
         if verbose:
-            logger.info("Executing {" + self.hadoop_base_dir + "/bin/hadoop " + 
+            logger.info("Executing {" + self.hadoop_bin_dir + "/hadoop " + 
                     command + "} in " + str(node))
 
-        proc = SshProcess(self.hadoop_base_dir + "/bin/hadoop " + command, node)
+        proc = SshProcess(self.hadoop_bin_dir + "/hadoop " + command, node)
 
         if verbose:
 
@@ -787,10 +792,10 @@ class HadoopCluster(object):
         command = job.get_command(exec_dir)
         
         # Execute
-        logger.info("Executing jar job. Command = {" + self.hadoop_base_dir +
-                    "/bin/hadoop " + command + "} in " + str(node))
+        logger.info("Executing jar job. Command = {" + self.hadoop_bin_dir +
+                    "/hadoop " + command + "} in " + str(node))
 
-        proc = SshProcess(self.hadoop_base_dir + "/bin/hadoop " + command, node)
+        proc = SshProcess(self.hadoop_bin_dir + "/hadoop " + command, node)
 
         if verbose:
 
@@ -954,7 +959,7 @@ class HadoopCluster(object):
           str: The version used by the Hadoop cluster.
         """
 
-        proc = SshProcess(self.hadoop_base_dir + "/bin/hadoop version",
+        proc = SshProcess(self.hadoop_bin_dir + "/hadoop version",
                           self.master)
         proc.run()
         version = proc.stdout.splitlines()[0]
