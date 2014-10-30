@@ -260,6 +260,7 @@ class HadoopEngine(Engine):
         self.ds_summary_file_name = "ds-summary.csv"
         self.summary_file = None
         self.ds_summary_file = None
+        self.num_repetitions = 1
 
         self.hadoop_props = None
 
@@ -366,13 +367,7 @@ class HadoopEngine(Engine):
             return False
         return True
 
-    def define_parameters(self):
-        """Create the iterator that contains the parameters to be explored."""
-
-        config = ConfigParser.ConfigParser()
-        config.readfp(open(self.config_file))
-
-        # TEST PARAMETERS
+    def __define_test_parameters(self, config):
         if config.has_section("test_parameters"):
             test_parameters_names = config.options("test_parameters")
             if "test.stats_path" in test_parameters_names:
@@ -398,6 +393,10 @@ class HadoopEngine(Engine):
                 self.ds_summary_file_name = \
                     config.get("test_parameters", "test.ds_summary_file")
 
+            if "test.num_repetitions" in test_parameters_names:
+                self.num_repetitions = \
+                    int(config.get("test_parameters", "test.num_repetitions"))
+
             if "test.hadoop.properties" in test_parameters_names:
                 self.hadoop_props = \
                     config.get("test_parameters", "test.hadoop.properties")
@@ -421,13 +420,12 @@ class HadoopEngine(Engine):
             else:
                 if "test.hadoop.tar_file" in test_parameters_names:
                     self.hadoop_tar_file = \
-                        bool(config.get("test_parameters", "test.hadoop.tar_file"))
+                        config.get("test_parameters", "test.hadoop.tar_file")
                 else:
                     logger.error("test.hadoop.tar_file should be specified")
                     raise ParameterException("test.hadoop.tar_file should be specified")
 
-
-        # DATASET PARAMETERS
+    def __define_ds_parameters(self, config):
         ds_parameters_names = config.options("ds_parameters")
         self.ds_parameters = {}
         ds_class_parameters = {}
@@ -445,7 +443,7 @@ class HadoopEngine(Engine):
         if not config.has_option("ds_parameters", "ds.dest"):
             ds_class_parameters["dest"] = "${data_dir}"
 
-        # Create ds configurations        
+        # Create ds configurations
         self.ds_config = []
         for (idx, ds_class) in enumerate(ds_classes):
             this_ds_params = {}
@@ -462,6 +460,18 @@ class HadoopEngine(Engine):
             self.ds_config.append((ds_class, this_ds_params))
 
         self.ds_parameters["ds.config"] = range(0, len(self.ds_config))
+
+    def define_parameters(self):
+        """Create the iterator that contains the parameters to be explored."""
+
+        config = ConfigParser.ConfigParser()
+        config.readfp(open(self.config_file))
+
+        # TEST PARAMETERS
+        self.__define_test_parameters(config)
+
+        # DATASET PARAMETERS
+        self.__define_ds_parameters(config)
 
         # EXPERIMENT PARAMETERS
         xp_parameters_names = config.options("xp_parameters")
@@ -514,8 +524,10 @@ class HadoopEngine(Engine):
         self.sweeper = ParamSweeper(os.path.join(self.result_dir, "sweeps"),
                                     sweep(self.parameters))
 
-        logger.info('Number of parameters combinations %s',
-                    len(self.sweeper.get_remaining()))
+        logger.info('Number of parameters combinations %s, '
+                    'Number of repetitions %s',
+                    len(self.sweeper.get_remaining()),
+                    self.num_repetitions)
 
     def _import_class(self, name):
         """Dynamically load a class and return a reference to it.
@@ -744,24 +756,30 @@ class HadoopEngine(Engine):
         try:
             logger.info("Execute experiment with combination " +
                         str(self.__get_xp_parameters(comb)))
-            self.comb_id += 1
-            self.macro_manager.update_test_macros(comb_id=self.comb_id)
-            self.macro_manager.replace_xp_macros(comb)
-            logger.info("Combination after macro replacement " +
-                        str(self.__get_xp_parameters(comb)))
 
-            # Prepare
-            self._change_hadoop_conf(comb)
-            job = self._create_hadoop_job(comb)
+            for nr in range(0, self.num_repetitions):
 
-            # Execute job
-            self.hc.execute_jar(job)
-            self._update_summary(comb, job)
+                logger.info("Repetition " + str(nr + 1))
+                rep_comb = comb.copy()
 
-            # Post-execution
-            self._copy_xp_output()
-            self._remove_xp_output()
-            self._copy_xp_stats()
+                self.comb_id += 1
+                self.macro_manager.update_test_macros(comb_id=self.comb_id)
+                self.macro_manager.replace_xp_macros(rep_comb)
+                logger.info("Combination after macro replacement " +
+                            str(self.__get_xp_parameters(rep_comb)))
+
+                # Prepare
+                self._change_hadoop_conf(rep_comb)
+                job = self._create_hadoop_job(rep_comb)
+
+                # Execute job
+                self.hc.execute_jar(job)
+                self._update_summary(rep_comb, job)
+
+                # Post-execution
+                self._copy_xp_output()
+                self._remove_xp_output()
+                self._copy_xp_stats()
 
             comb_ok = True
 
