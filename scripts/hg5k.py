@@ -20,6 +20,7 @@ __user_login = getpass.getuser()
 
 hg5k_tmp_dir = "/tmp/" + __user_login + "_hg5k/clusters"
 
+
 def deserialize_hcluster(hc_file_name):
     """Return a Hadoop Cluster object from the given file.
     
@@ -70,13 +71,12 @@ if __name__ == "__main__":
         most_recent_access = 0
 
         for f in files:
-            fstat = os.stat(os.path.join(hg5k_tmp_dir,f))
+            fstat = os.stat(os.path.join(hg5k_tmp_dir, f))
             if fstat.st_atime > most_recent_access:
                 most_recent_file = int(f)
                 most_recent_access = fstat.st_atime
 
         return most_recent_file
-
 
     def __generate_new_id():
         """Return the highest generated id + 1.
@@ -93,10 +93,9 @@ if __name__ == "__main__":
             highest_id = 0
 
             for f in files:
-                highest_id = max(highest_id,int(f))
+                highest_id = max(highest_id, int(f))
 
             return highest_id + 1
-
 
     def __generate_hosts(file_name):
         """Generate a list of hosts from the given file.
@@ -117,11 +116,9 @@ if __name__ == "__main__":
             if not h in hosts:
                 hosts.append(h)
 
-        return hosts        
+        return hosts
 
-
-    # Main #######################################################################
-
+    # Main #####################################################################
     prog = "hadoop_g5k"
     description = "This tool helps you to manage a Hadoop cluster in Grid5000."
     parser = ArgumentParser(prog=prog,
@@ -140,19 +137,22 @@ if __name__ == "__main__":
                         action="store",
                         nargs=1,
                         metavar="ID",
-                        help="The identifier of the cluster. If not indicated, last used cluster will be used (if any)")
+                        help="The identifier of the cluster. If not indicated, "
+                             "last used cluster will be used (if any)")
 
     actions.add_argument("--node",
                         action="store",
                         nargs=1,
                         metavar="NODE",
-                        help="Node where the action will be executed. Applies only to --execute and --jarjob")
+                        help="Node where the action will be executed. Applies "
+                             "only to --execute and --jarjob")
                         
     actions.add_argument("--libjars",
                         action="store",
                         nargs="+",
                         metavar="LIB_JARS",
-                        help="A list of libraries to be used in job execution. Applies only to --jarjob")
+                        help="A list of libraries to be used in job execution. "
+                             "Applies only to --jarjob")
                         
     verbose_group = actions.add_mutually_exclusive_group()
 
@@ -166,8 +166,8 @@ if __name__ == "__main__":
                                action="store_true",
                                help="Run in quiet mode")
 
-    object_group = parser.add_argument_group(style.host("Object management options"), 
-                        "Options to create and destory hadoop cluster objects.")
+    object_group = parser.add_argument_group(style.host("Object management options"),
+                        "Options to create and destroy hadoop cluster objects.")
 
     object_mutex_group = object_group.add_mutually_exclusive_group()
 
@@ -175,7 +175,8 @@ if __name__ == "__main__":
                               metavar="MACHINELIST",
                               nargs=1,
                               action="store",
-                              help="Create the cluster object with the nodes in MACHINELIST file")
+                              help="Create the cluster object with the nodes in"
+                                   " MACHINELIST file")
 
     object_mutex_group.add_argument("--delete",
                               dest="delete",
@@ -192,24 +193,30 @@ if __name__ == "__main__":
                         dest="properties",
                         nargs=1,
                         action="store",
-                        help="File containing the properties to be used (INI file). Applies only to --create")
+                        help="File containing the properties to be used (INI "
+                             "file). Applies only to --create")
                         
     object_group.add_argument("--bootstrap",
                               metavar="HADOOP_TAR",
                               nargs=1,
                               action="store",
-                              help="Install hadoop in the cluster nodes taking into account the specified properties.\n"
-                                   "HADOOP_TAR defines the path of the .tar.gz file containing hadoop binaries.")
+                              help="Install hadoop in the cluster nodes taking "
+                                   "into account the specified properties.\n"
+                                   "HADOOP_TAR defines the path of the .tar.gz "
+                                   "file containing hadoop binaries.")
                               
-    actions = parser.add_argument_group(style.host("Hadoop actions"), 
-        "Actions to execute in the hadoop cluster. Several options can be indicated at the same time.\n" +
-        "The order of execution is fixed no matter the order used in the arguments: it follows the order\n" +
+    actions = parser.add_argument_group(style.host("Hadoop actions"),
+        "Actions to execute in the hadoop cluster. Several options can be "
+        "indicated at the same time.\n" +
+        "The order of execution is fixed no matter the order used in the "
+        "arguments: it follows the order\n" +
         "of the options.") 
 
     actions.add_argument("--initialize",
                         dest="initialize",
                         action="store_true",
-                        help="Initialize cluster: Copy configuration and format dfs")
+                        help="Initialize cluster: Copy configuration and format"
+                             " dfs")
                         
     actions.add_argument("--changeconf",
                         action="store",
@@ -225,14 +232,16 @@ if __name__ == "__main__":
     actions.add_argument("--putindfs",
                         action="store",
                         nargs="+",
-                        metavar=("PATH"),
-                        help="Copy a set of local paths into the remote path in dfs")                        
+                        metavar="PATH",
+                        help="Copy a set of local paths into the remote path "
+                             "in dfs")
                         
     actions.add_argument("--getfromdfs",
                         action="store",
                         nargs=2,
-                        metavar=("DFS_PATH","LOCAL_PATH"),
-                        help="Copy a remote path in dfs into the specified local path")         
+                        metavar=("DFS_PATH", "LOCAL_PATH"),
+                        help="Copy a remote path in dfs into the specified "
+                             "local path")
 
     actions.add_argument("--execute",
                         action="store",
@@ -243,8 +252,9 @@ if __name__ == "__main__":
     actions.add_argument("--jarjob",
                         action="store",
                         nargs="+",
-                        metavar=("LOCAL_JAR_PATH","PARAM"),
-                        help="Copy the jar file and execute it with the specified parameters")
+                        metavar=("LOCAL_JAR_PATH", "PARAM"),
+                        help="Copy the jar file and execute it with the "
+                             "specified parameters")
 
     actions.add_argument("--copyhistory",
                         action="store",
@@ -276,23 +286,23 @@ if __name__ == "__main__":
                              "  dfs        Show filesystem state\n" +
                              "  dfsblocks  Show dfs blocks information\n" +
                              "  mrjobs     Show mapreduce state\n")
-                                           
 
     args = parser.parse_args()
 
     # Get id
     if args.id:
-        id = int(args.id[0])
+        hc_id = int(args.id[0])
     else:
         if args.create:
-            id = __generate_new_id()
+            hc_id = __generate_new_id()
         else:
-            id = __get_default_id()
-            if not id:
-                logger.error("There is no available cluster. You must create a new one")
+            hc_id = __get_default_id()
+            if not hc_id:
+                logger.error("There is no available cluster. You must create a"
+                             " new one")
                 sys.exit(3)
 
-    logger.info("Using id = " + str(id))
+    logger.info("Using id = " + str(hc_id))
 
     verbose = True
     if args.quiet:
@@ -307,11 +317,12 @@ if __name__ == "__main__":
             node_host = Host(args.node[0])
 
     # Create or load object
-    hc_file_name = os.path.join(hg5k_tmp_dir,str(id))
+    hc_file_name = os.path.join(hg5k_tmp_dir, str(hc_id))
     if args.create:
 
         if os.path.exists(hc_file_name):
-            logger.error("There is a hadoop cluster with that id. You must remove it before or chose another id")
+            logger.error("There is a hadoop cluster with that id. You must "
+                         "remove it before or chose another id")
             sys.exit(1)
 
         hosts = __generate_hosts(args.create[0])
@@ -322,9 +333,11 @@ if __name__ == "__main__":
             elif args.version[0].startswith("1."):
                 hadoop_class = HadoopCluster
             elif args.version[0].startswith("2."):
-                logger.error("Clusetr for HadoopV2 not implemented yet")
+                logger.error("Cluster for HadoopV2 not implemented yet")
+                sys.exit(2)
             else:
                 logger.error("Unknown hadoop version")
+                sys.exit(2)
         else:
             hadoop_class = HadoopCluster
         
@@ -360,8 +373,8 @@ if __name__ == "__main__":
 
     if args.changeconf:
         params = {}
-        for str in args.changeconf:
-            parts = str.split("=")
+        for assig in args.changeconf:
+            parts = assig.split("=")
             params[parts[0]] = parts[1]
 
         hc.change_conf(params)
@@ -387,17 +400,19 @@ if __name__ == "__main__":
         actionCreate.run()
         
         def copy_function(host, files_to_copy):
-            action = Put([ host ], files_to_copy, tmp_dir)
+            action = Put([host], files_to_copy, tmp_dir)
             action.run()
             
             for f in files_to_copy:
                 src_file = os.path.join(tmp_dir, os.path.basename(f))
             
-                hc.execute("fs -put " + src_file + " " + os.path.join(dest, os.path.basename(src_file)), host, True, False)                
+                hc.execute("fs -put " + src_file + " " +
+                           os.path.join(dest, os.path.basename(src_file)),
+                           host, True, False)
                 
         # Assign files to hosts  
         files_per_host = [[]] * len(hosts)
-        for idx in range(0,len(hosts)):
+        for idx in range(0, len(hosts)):
             files_per_host[idx] = local_paths[idx::len(hosts)]
             
         # Create threads and launch them
@@ -406,7 +421,8 @@ if __name__ == "__main__":
         threads = []
         for idx, h in enumerate(hosts):
             if files_per_host[idx]:
-                t = threading.Thread(target = copy_function, args = (h, files_per_host[idx]))
+                t = threading.Thread(target=copy_function,
+                                     args=(h, files_per_host[idx]))
                 t.start()
                 threads.append(t)
 
@@ -420,21 +436,25 @@ if __name__ == "__main__":
 
         tmp_dir = "/tmp"
         # Remove file in tmp dir if exists
-        proc = SshProcess("rm -rf " + os.path.join(tmp_dir, os.path.basename(remote_path)), hc.master)
+        proc = SshProcess("rm -rf " +
+                          os.path.join(tmp_dir, os.path.basename(remote_path)),
+                          hc.master)
         proc.run()
         
         # Get files in master
-        hc.execute("fs -get " + remote_path + " " + tmp_dir, verbose = False)
+        hc.execute("fs -get " + remote_path + " " + tmp_dir, verbose=False)
         
         # Copy files from master
-        action = Get([hc.master], [ os.path.join(tmp_dir,os.path.basename(remote_path)) ], local_path)
+        action = Get([hc.master],
+                     [os.path.join(tmp_dir, os.path.basename(remote_path))],
+                     local_path)
         action.run()
 
     if args.execute:
         if node_host:
-            hc.execute(args.execute[0], node_host, verbose = verbose)
+            hc.execute(args.execute[0], node_host, verbose=verbose)
         else:
-            hc.execute(args.execute[0], verbose = verbose)
+            hc.execute(args.execute[0], verbose=verbose)
 
     if args.jarjob:
         if len(args.jarjob) > 1:
@@ -446,13 +466,13 @@ if __name__ == "__main__":
                 libjars = None
                            
             hc.execute_jar(HadoopJarJob(args.jarjob[0], args.jarjob[1:], libjars),
-                               node = node_host, verbose = verbose)
+                               node=node_host, verbose=verbose)
         else:
             if node_host:
-                hc.execute_jar(HadoopJarJob(args.jarjob[0]), node = node_host,
-                               verbose = verbose)
+                hc.execute_jar(HadoopJarJob(args.jarjob[0]), node=node_host,
+                               verbose=verbose)
             else:
-                hc.execute_jar(HadoopJarJob(args.jarjob[0]), verbose = verbose)
+                hc.execute_jar(HadoopJarJob(args.jarjob[0]), verbose=verbose)
 
     if args.copyhistory:
         hc.copy_history(args.copyhistory[0])
@@ -467,7 +487,7 @@ if __name__ == "__main__":
         if args.state == "general":
             
             logger.info("---------------------------------------------------------")
-            logger.info(style.user2("Hadoop Cluster with ID " + str(id)))
+            logger.info(style.user2("Hadoop Cluster with ID " + str(hc_id)))
             logger.info(style.user1("    Version: ") + hc.get_version())
             logger.info(style.user1("    Master: ") + str(hc.master))
             logger.info(style.user1("    Hosts: ") + str(hc.hosts))
@@ -484,29 +504,29 @@ if __name__ == "__main__":
             logger.info("---------------------------------------------------------")
         
         elif args.state == "files":                      
-            (stdout, stderr) = hc.execute("fs -lsr /", verbose = False)
+            (stdout, stderr) = hc.execute("fs -lsr /", verbose=False)
             print ""            
             for line in stdout.splitlines():
                 if not "WARN fs.FileSystem" in line:
                     print line
             print ""
             
-            (stdout, stderr) = hc.execute("fs -dus /", verbose = False)            
+            (stdout, stderr) = hc.execute("fs -dus /", verbose=False)
             pos = stdout.rfind("\t")
             size = int(stdout[pos + 1:])
             
             human_readable_size = ""
             if 1024 < size < 1024*1024:
-                human_readable_size = " (%.1f KB)" + (float(size)/1024)
+                human_readable_size = " (%.1f KB)" % (float(size)/1024)
             elif 1024*1024 < size < 1024*1024*1024:
-                human_readable_size = " (%.1f MB)" + (float(size)/(1024*1024))
+                human_readable_size = " (%.1f MB)" % (float(size)/(1024*1024))
             elif size > 1024*1024*1024:
                 human_readable_size = " (%.1f GB)" % (float(size)/(1024*1024*1024))
         
             print "Total Size = " + str(size) + human_readable_size + "\n"
                     
         elif args.state == "dfs":
-            (stdout, stderr) = hc.execute("dfsadmin -report", verbose = False)
+            (stdout, stderr) = hc.execute("dfsadmin -report", verbose=False)
             print ""            
             for line in stdout.splitlines():
                 if not "WARN fs.FileSystem" in line:
@@ -514,13 +534,13 @@ if __name__ == "__main__":
             print ""
             
         elif args.state == "dfsblocks":
-            (stdout, stderr) = hc.execute("fsck -blocks", verbose = False)
+            (stdout, stderr) = hc.execute("fsck -blocks", verbose=False)
             print ""
             print stdout            
             print ""
                     
         elif args.state == "mrjobs":
-            (stdout, stderr) = hc.execute("job -list all", verbose = False)
+            (stdout, stderr) = hc.execute("job -list all", verbose=False)
             print ""            
             print stdout
             print ""

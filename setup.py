@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-from setuptools import setup,find_packages
+from setuptools import setup, find_packages
 
 setup (
   name = "hadoop_g5k",
@@ -14,8 +14,8 @@ setup (
   # PyPI
   author = 'Miguel Liroz Gistau',
   author_email = 'miguel.liroz_gistau@inria.fr',
-  description = "A collection of scripts and packages that help in the deployment"
-    " and experimental evaluation of Hadoop in Grid5000.",
+  description = "A collection of scripts and packages that help in the "
+                "deployment and experimental evaluation of Hadoop in Grid5000.",
   url = "https://github.com/mliroz/hadoop_g5k",
   license = "BSD",  
   keywords = "hadoop g5k grid5000 execo",
