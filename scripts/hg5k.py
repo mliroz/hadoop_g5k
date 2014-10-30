@@ -6,15 +6,15 @@ import pickle
 import sys
 import threading
 
-from hadoop_g5k import HadoopCluster, HadoopJarJob
-
 from argparse import ArgumentParser, RawTextHelpFormatter
 
-from execo import Host
 from execo.action import Get, Put, TaktukRemote
+from execo.host import Host
 from execo.log import style
 from execo.process import SshProcess
 from execo_engine import logger
+
+from hadoop_g5k.cluster import HadoopCluster, HadoopJarJob
 
 __user_login = getpass.getuser()
 

@@ -7,16 +7,21 @@ import sys
 import time
 import ConfigParser
 
-from hadoop_g5k import HadoopCluster, HadoopJarJob
-
 from execo.action import Get, Remote
 from execo.process import SshProcess
 from execo.time_utils import timedelta_to_seconds, format_date, get_seconds
-from execo_g5k import get_cluster_site, get_oar_job_info, oardel, oarsub, \
-    get_planning, compute_slots, get_jobs_specs, get_oar_job_nodes, \
-    deploy, Deployment, get_current_oar_jobs
-from execo_engine import Engine, logger, sweep, ParamSweeper
+from execo_engine import logger
+from execo_engine.engine import Engine
+from execo_engine.sweep import ParamSweeper, sweep
+from execo_g5k.api_utils import get_cluster_site
+from execo_g5k.kadeploy import Deployment, deploy
+from execo_g5k.oar import oarsub, get_oar_job_nodes, get_oar_job_info, oardel
+from execo_g5k.planning import get_jobs_specs, get_planning, compute_slots
+
 from networkx import DiGraph, NetworkXUnfeasible, topological_sort
+
+from hadoop_g5k.cluster import HadoopCluster, HadoopJarJob
+
 
 DEFAULT_DATA_BASE_DIR = "/tests/data"
 DEFAULT_OUT_BASE_DIR = "/tests/out"
@@ -278,7 +283,7 @@ class HadoopEngine(Engine):
         self.site = get_cluster_site(self.cluster)
 
         if not os.path.exists(self.config_file):
-            logger.error("Params file " + self.params_file + " does not exist")
+            logger.error("Params file " + self.config_file + " does not exist")
             sys.exit(1)
 
         # Set oar job id
