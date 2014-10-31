@@ -459,22 +459,20 @@ if __name__ == "__main__":
             hc.execute(args.execute[0], verbose=verbose)
 
     if args.jarjob:
-        if len(args.jarjob) > 1:
-            if not node_host:
-                node_host = None
-            if args.libjars:
-                libjars = args.libjars
-            else:
-                libjars = None
-                           
-            hc.execute_jar(HadoopJarJob(args.jarjob[0], args.jarjob[1:], libjars),
-                               node=node_host, verbose=verbose)
+        if not node_host:
+            node_host = None
+        if args.libjars:
+            libjars = args.libjars
         else:
-            if node_host:
-                hc.execute_jar(HadoopJarJob(args.jarjob[0]), node=node_host,
-                               verbose=verbose)
-            else:
-                hc.execute_jar(HadoopJarJob(args.jarjob[0]), verbose=verbose)
+            libjars = None
+
+        job = HadoopJarJob(args.jarjob[0], args.jarjob[1:], libjars)
+
+        hc.execute_jar(job, verbose=verbose, node=node_host)
+        if job.success:
+            print "Job with id " + job.job_id + " finished successfully"
+        else:
+            print "Job finished with errors"
 
     if args.copyhistory:
         hc.copy_history(args.copyhistory[0], args.copyhistory[1:])

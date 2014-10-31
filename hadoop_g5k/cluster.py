@@ -145,6 +145,7 @@ echo $output
 class HadoopJarJob(object):
     state = -1
     job_id = "unknown"
+    success = None
 
     def __init__(self, jar_path, params=None, lib_paths=None):
         """Documentation"""
@@ -820,6 +821,7 @@ class HadoopCluster(object):
         # Get job info
         job.stdout = proc.stdout
         job.stderr = proc.stderr
+        job.success = (proc.exit_code == 0)
 
         for line in job.stdout.splitlines():
             if "Running job" in line:
