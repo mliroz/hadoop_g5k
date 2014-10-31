@@ -4,6 +4,7 @@ import threading
 from abc import ABCMeta, abstractmethod
 
 from execo.action import Put, Remote, TaktukRemote
+from execo.process import SshProcess
 from execo_engine import logger
 from hadoop_g5k.cluster import HadoopCluster, HadoopJarJob
 from hadoop_g5k.util import import_function
@@ -52,7 +53,7 @@ class Dataset(object):
                 removed = True
 
         if not removed:
-            logger.warn("The dataset was not deployed in the given cluster")
+            logger.warn("The dataset was not loaded in the given cluster")
 
 
 class StaticDataset(Dataset):
@@ -126,7 +127,10 @@ class StaticDataset(Dataset):
                     break
 
         else:
+            real_size = 0
             all_files_to_copy = dataset_files
+            for f in all_files_to_copy:
+                real_size += os.path.getsize(f)
 
         # Assign files to hosts
         files_per_host = [[]] * len(hosts)
@@ -135,34 +139,63 @@ class StaticDataset(Dataset):
 
         # Create threads and launch them
         logger.info(
-            "Deploying dataset in parallel into " + str(len(hosts)) + " hosts")
+            "Loading dataset in parallel into " + str(len(hosts)) + " hosts")
         if not hc.running:
             hc.start()
 
-        def copy_function(host, files_to_copy):
+        class SizeCollector:
+            size = 0
+            lock = threading.Lock()
+
+            def increment(self, qty):
+                self.lock.acquire()
+                try:
+                    self.size += qty
+                finally:
+                    self.lock.release()
+
+        def copy_function(host, files_to_copy, collector=None):
             action = Put([host], files_to_copy, tmp_dir)
             action.run()
+
+            local_final_size = 0
 
             for f in files_to_copy:
                 src_file = os.path.join(tmp_dir, os.path.basename(f))
                 if self.pre_load_function:
                     src_file = self.pre_load_function(src_file, host)
 
+                    action = SshProcess("du -b " + src_file + "| cut -f1", host)
+                    action.run()
+
+                    local_final_size += int(action.stdout.strip())
+
                 hc.execute("fs -put " + src_file + " " +
                            os.path.join(dest, os.path.basename(src_file)),
                            host, True, False)
+
+            if collector:
+                collector.increment(local_final_size)
+
+        if self.pre_load_function:
+            final_size = SizeCollector()
+        else:
+            final_size = None
 
         threads = []
         for idx, h in enumerate(hosts):
             if files_per_host[idx]:
                 t = threading.Thread(target=copy_function,
-                                     args=(h, files_per_host[idx]))
+                                     args=(h, files_per_host[idx], final_size))
                 t.start()
                 threads.append(t)
 
         # Wait for the threads to finish
         for t in threads:
             t.join()
+
+        logger.info("Loading completed: real local size = " + str(real_size) +
+                    ", final remote size = " + str(final_size.size))
 
         self.deployments[hc, desired_size] = dest
 
