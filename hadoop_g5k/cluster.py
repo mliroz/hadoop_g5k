@@ -7,7 +7,10 @@ import shutil
 import stat
 import sys
 import tempfile
-import ConfigParser
+try:  # Import Python 3 package, turn back to Python 2 if fails
+    import configparser
+except ImportError:
+    import ConfigParser as configparser
 
 from execo.action import Put, TaktukPut, Get, Remote
 from execo.process import SshProcess
@@ -248,7 +251,7 @@ class HadoopCluster(object):
         """
 
         # Load cluster properties
-        config = ConfigParser.ConfigParser(self.defaults)
+        config = configparser.ConfigParser(self.defaults)
         config.add_section("cluster")
         config.add_section("local")
 

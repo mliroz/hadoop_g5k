@@ -5,7 +5,10 @@ import os
 import re
 import sys
 import time
-import ConfigParser
+try:  # Import Python 3 package, turn back to Python 2 if fails
+    import configparser
+except ImportError:
+    import ConfigParser as configparser
 
 from execo.action import Get, Remote
 from execo.process import SshProcess
@@ -469,7 +472,7 @@ class HadoopEngine(Engine):
     def define_parameters(self):
         """Create the iterator that contains the parameters to be explored."""
 
-        config = ConfigParser.ConfigParser()
+        config = configparser.ConfigParser()
         config.readfp(open(self.config_file))
 
         # TEST PARAMETERS
