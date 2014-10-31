@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import time
+
 try:  # Import Python 3 package, turn back to Python 2 if fails
     import configparser
 except ImportError:
@@ -24,6 +25,7 @@ from execo_g5k.planning import get_jobs_specs, get_planning, compute_slots
 from networkx import DiGraph, NetworkXUnfeasible, topological_sort
 
 from hadoop_g5k.cluster import HadoopCluster, HadoopJarJob
+from hadoop_g5k.util import import_class
 
 
 DEFAULT_DATA_BASE_DIR = "/tests/data"
@@ -537,23 +539,6 @@ class HadoopEngine(Engine):
                     len(self.sweeper.get_remaining()),
                     self.num_repetitions)
 
-    def _import_class(self, name):
-        """Dynamically load a class and return a reference to it.
-        
-        Args:
-          name (str): the class name, including its package hierarchy.
-          
-        Returns:
-          A reference to the class.
-        """
-
-        last_dot = name.rfind(".")
-        package_name = name[:last_dot]
-        class_name = name[last_dot + 1:]
-
-        mod = __import__(package_name, fromlist=[class_name])
-        return getattr(mod, class_name)
-
     def __get_ds_parameters(self, params):
         ds_params = {}
         for pn in self.ds_parameters:
@@ -715,7 +700,7 @@ class HadoopEngine(Engine):
         # Create dataset
         ds_idx = comb["ds.config"]
         (ds_class_name, ds_params) = self.ds_config[ds_idx]
-        ds_class = self._import_class(ds_class_name)
+        ds_class = import_class(ds_class_name)
         self.ds = ds_class(ds_params)
 
         # Deploy dataset
