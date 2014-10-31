@@ -7,7 +7,7 @@ setup (
   version = "0.1",
 
   packages = ["hadoop_g5k"],
-  scripts = ["scripts/hg5k.py", "scripts/hadoop_engine.py"],
+  scripts = ["scripts/hg5k", "scripts/hadoop_engine"],
 
   install_requires=["execo", " networkx"],
 
