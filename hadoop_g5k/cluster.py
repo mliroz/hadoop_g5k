@@ -828,7 +828,7 @@ class HadoopCluster(object):
 
         return (proc.stdout, proc.stderr)
 
-    def copy_history(self, dest):
+    def copy_history(self, dest, job_ids=None):
         """Copy history logs from master.
         
         Args:
@@ -839,7 +839,21 @@ class HadoopCluster(object):
             logger.warning("Destination directory " + dest +
                            " does not exist. It will be created")
 
-        remote_files = [os.path.join(self.hadoop_logs_dir, "history")]
+        history_dir = os.path.join(self.hadoop_logs_dir, "history")
+        if job_ids:
+            pattern = " -o ".join("-name " + jid + "*" for jid in job_ids)
+            list_dirs = SshProcess("find " + history_dir + " " + pattern,
+                                   self.master)
+            list_dirs.run()
+        else:
+            list_dirs = SshProcess("find " + history_dir + " -name job_*",
+                                   self.master)
+            list_dirs.run()
+
+        remote_files = []
+        for line in list_dirs.stdout.splitlines():
+            remote_files.append(line)
+
         action = Get([self.master], remote_files, dest)
         action.run()
 

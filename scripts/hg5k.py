@@ -258,9 +258,11 @@ if __name__ == "__main__":
 
     actions.add_argument("--copyhistory",
                         action="store",
-                        nargs=1,
-                        metavar="LOCAL_PATH",
-                        help="Copy history to the specified path")                                      
+                        nargs="+",
+                        metavar=("LOCAL_PATH", "JOB_ID"),
+                        help="Copy history to the specified path.\n"
+                             "If a list of job ids is given, just copy the "
+                             "stats of those jobs.")
 
     actions.add_argument("--stop",
                         dest="stop",
@@ -475,7 +477,7 @@ if __name__ == "__main__":
                 hc.execute_jar(HadoopJarJob(args.jarjob[0]), verbose=verbose)
 
     if args.copyhistory:
-        hc.copy_history(args.copyhistory[0])
+        hc.copy_history(args.copyhistory[0], args.copyhistory[1:])
 
     if args.stop:
         hc.stop()
