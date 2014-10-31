@@ -325,7 +325,7 @@ class HadoopEngine(Engine):
                 self.raw_comb = comb.copy()
                 self.comb = comb
                 self.prepare_dataset(comb)
-                self.xp(comb)
+                self.xp_wrapper(comb)
 
                 # subloop over the combinations that use the same dataset
                 while True:
@@ -334,7 +334,7 @@ class HadoopEngine(Engine):
                     if newcomb:
                         self.raw_comb = newcomb.copy()
                         try:
-                            self.xp(newcomb)
+                            self.xp_wrapper(newcomb)
                         except:
                             break
                     else:
@@ -688,48 +688,27 @@ class HadoopEngine(Engine):
         self.hc.start_and_wait()
 
         # Populate dataset
-        self.deploy_ds(comb)
+        self.load_ds(comb)
 
-    def deploy_ds(self, comb):
-        """Deploy the dataset corresponding to the given combination.
+    def load_ds(self, comb):
+        """Load the dataset corresponding to the given combination.
         
         Args:
           comb (dict): The combination containing the dataset's parameters.
         """
 
-        # Create dataset
+        # Create dataset object
         ds_idx = comb["ds.config"]
         (ds_class_name, ds_params) = self.ds_config[ds_idx]
         ds_class = import_class(ds_class_name)
         self.ds = ds_class(ds_params)
 
-        # Deploy dataset
-
-        # Temporarily hard coded ----------------------------------------------
-        def uncompress_function(file_name, host):
-            #action = Remote("gzip -d " + file_name, [host])
-            action = Remote("bzip2 -d " + file_name, [host])
-            action.run()
-
-            base_name = os.path.basename(file_name[:-4])
-            dir_name = os.path.dirname(file_name[:-4])
-
-            new_name = dir_name + "/data-" + base_name
-
-            action = Remote("mv " + file_name[:-4] + " " + new_name, [host])
-            action.run()
-
-            #return file_name[:-3] # Remove .gz (provisional)        
-            #return file_name[:-4] # Remove .bz2 (provisional)
-            return new_name
-        # ---------------------------------------------------------------------
-
-        self.ds.deploy(self.hc, comb["ds.dest"], int(comb["ds.size"]),
-                       uncompress_function)
+        # Load dataset
+        self.ds.load(self.hc, comb["ds.dest"], int(comb["ds.size"]))
         self._update_ds_summary(comb)
 
     def _update_ds_summary(self, comb):
-        """Update ds summary with the deployed ds"""
+        """Update ds summary with the loaded ds"""
 
         ds_idx = comb["ds.config"]
         (ds_class_name, ds_params) = self.ds_config[ds_idx]
@@ -738,8 +717,8 @@ class HadoopEngine(Engine):
         self.ds_summary_file.write(line + "\n")
         self.ds_summary_file.flush()
 
-    def xp(self, comb):
-        """Perform the experiment corresponding to the given combination.
+    def xp_wrapper(self, comb):
+        """Perform macro replacement and manage experiment's repetitions.
         
         Args:
           comb (dict): The combination with the experiment's parameters.
@@ -761,18 +740,8 @@ class HadoopEngine(Engine):
                 logger.info("Combination after macro replacement " +
                             str(self.__get_xp_parameters(rep_comb)))
 
-                # Prepare
-                self._change_hadoop_conf(rep_comb)
-                job = self._create_hadoop_job(rep_comb)
-
-                # Execute job
-                self.hc.execute_jar(job)
-                self._update_summary(rep_comb, job)
-
-                # Post-execution
-                self._copy_xp_output()
-                self._remove_xp_output()
-                self._copy_xp_stats()
+                # Execution
+                self.xp(rep_comb)
 
             comb_ok = True
 
@@ -782,6 +751,27 @@ class HadoopEngine(Engine):
             else:
                 self.sweeper.cancel(comb)
             logger.info('%s Remaining', len(self.sweeper.get_remaining()))
+
+    def xp(self, comb):
+        """Perform the experiment corresponding to the given combination.
+
+        Args:
+          comb (dict): The combination with the experiment's parameters.
+        """
+
+        # Prepare
+        self._change_hadoop_conf(comb)
+        job = self._create_hadoop_job(comb)
+
+        # Execute job
+        self.hc.execute_jar(job)
+        self._update_summary(comb, job)
+
+        # Post-execution
+        self._copy_xp_output()
+        self._remove_xp_output()
+        self._copy_xp_stats()
+
 
     def _change_hadoop_conf(self, comb):
         """Change hadoop's configuration by using the experiment's parameters.

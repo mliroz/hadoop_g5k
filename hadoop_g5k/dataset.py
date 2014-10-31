@@ -5,7 +5,8 @@ from abc import ABCMeta, abstractmethod
 
 from execo.action import Put, Remote, TaktukRemote
 from execo_engine import logger
-from hadoop_g5k import HadoopCluster
+from hadoop_g5k.cluster import HadoopCluster, HadoopJarJob
+from hadoop_g5k.util import import_function
 
 
 class Dataset(object):
@@ -24,15 +25,16 @@ class Dataset(object):
         self.params = params
 
     @abstractmethod
-    def deploy(self, hc, dest, desired_size=None):
-        """Deploy the dataset in the given dfs folder.
+    def load(self, hc, dest, desired_size=None):
+        """Load the dataset in the given dfs folder.
         
         Args:
           hc (HadoopCluster): The hadoop cluster where to deploy the dataset.
           dest (str): The dfs destination folder.
           desired_size (int, optional): The size of the data to be copied.
         """
-        deployments[hc, desired_size] = dest
+
+        self.deployments[hc, desired_size] = dest
 
     def clean(self, hc):
         """Remove the dataset from dfs.
@@ -43,9 +45,9 @@ class Dataset(object):
         """
 
         removed = False
-        for (hcd, sized) in deployments:
+        for (hcd, sized) in self.deployments:
             if hc == hcd:
-                command = "fs -rmr " + deployments[hc, sized]
+                command = "fs -rmr " + self.deployments[hc, sized]
                 hc.execute(command, should_be_running=True, verbose=False)
                 removed = True
 
@@ -66,6 +68,8 @@ class StaticDataset(Dataset):
             the following parameters:
             - local_path: The path to the directory where the dataset is stored
                           locally.
+            - pre_load_function: A function to be applied after transfers and
+                                 before uploading to dfs (usually decompression).
         """
 
         super(StaticDataset, self).__init__(params)
@@ -74,10 +78,16 @@ class StaticDataset(Dataset):
         if not os.path.exists(local_path):
             logger.error("The dataset local dir does not exist")
 
+        if "pre_load_function" in params:
+            pre_load_function_name = params["pre_load_function"]
+            self.pre_load_function = import_function(pre_load_function_name)
+        else:
+            self.pre_load_function = None
+
         self.local_path = local_path
 
-    def deploy(self, hc, dest, desired_size=None, pre_processing_function=None):
-        """Deploy the dataset in the given dfs folder by copying it from the
+    def load(self, hc, dest, desired_size=None):
+        """Load the dataset in the given dfs folder by copying it from the
         local folder.
         
         Args:
@@ -85,9 +95,7 @@ class StaticDataset(Dataset):
           dest (str): The dfs destination folder.
           desired_size (int, optional): The size of the data to be copied. If
             indicated only the first files of the dataset up to the given size
-            are copied, if not, the whole dataset is transferred.          
-          pre_processing_function (func): An function to be applied after
-            transfers and before uploading to dfs (usually decompression).
+            are copied, if not, the whole dataset is transferred.
         """
 
         dataset_files = [os.path.join(self.local_path, f) for f in
@@ -137,8 +145,8 @@ class StaticDataset(Dataset):
 
             for f in files_to_copy:
                 src_file = os.path.join(tmp_dir, os.path.basename(f))
-                if pre_processing_function:
-                    src_file = pre_processing_function(src_file, host)
+                if self.pre_load_function:
+                    src_file = self.pre_load_function(src_file, host)
 
                 hc.execute("fs -put " + src_file + " " +
                            os.path.join(dest, os.path.basename(src_file)),
@@ -170,9 +178,9 @@ class DynamicDataset(Dataset):
         Args:
           params (dict): A dictionary with the parameters. This dataset needs
             the following parameters:
-            - job_conf: The info to create the HadoopJarJob which generates the
-                        dataset.
-            
+            - job.jar: The path to the jar containing the job to be executed.
+            - job.params: The set of params of the job.
+            - job.libjars: The list of jars to be used as libraries.
         """
 
         super(DynamicDataset, self).__init__(params)
@@ -190,13 +198,13 @@ class DynamicDataset(Dataset):
         else:
             jobparams = []
 
-        self.job = HadoopJar(jobjar, jobparams, libjars)
+        self.job = HadoopJarJob(jobjar, jobparams, libjars)
 
         # Other parameters
         # TODO
 
-    def deploy(self, hc, dest, desired_size=None):
-        """Deploy the dataset in the given dfs folder by generating it
+    def load(self, hc, dest, desired_size=None):
+        """Load the dataset in the given dfs folder by generating it
         dynamically.
         
         Args:
