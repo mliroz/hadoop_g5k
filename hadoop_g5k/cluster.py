@@ -840,6 +840,7 @@ class HadoopCluster(object):
         if not os.path.exists(dest):
             logger.warning("Destination directory " + dest +
                            " does not exist. It will be created")
+            os.makedirs(dest)
 
         history_dir = os.path.join(self.hadoop_logs_dir, "history")
         if job_ids:
