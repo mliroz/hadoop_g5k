@@ -15,7 +15,7 @@ except ImportError:
 from execo.action import Put, TaktukPut, Get, Remote
 from execo.process import SshProcess
 from execo_engine import logger
-from execo_g5k.api_utils import get_host_attributes
+from execo_g5k.api_utils import get_host_attributes, get_host_cluster
 
 # Constant definitions
 CORE_CONF_FILE = "core-site.xml"
@@ -148,7 +148,14 @@ class HadoopJarJob(object):
     success = None
 
     def __init__(self, jar_path, params=None, lib_paths=None):
-        """Documentation"""
+        """Creates a new Hadoop MapReduce jar job with the given parameters.
+
+        Args:
+          jar_path (str): The local path of the jar containing the job.
+          params (list of str, optional): The list of parameters of the job.
+          lib_paths (list of str, optional): The list of local paths to the
+            libraries used by the job.
+        """
 
         if not params:
             params = []
@@ -171,7 +178,9 @@ class HadoopJarJob(object):
         self.lib_paths = lib_paths
 
     def get_files_to_copy(self):
-        """Documentation"""
+        """Return the set of files that are used by the job and need to be
+        copied to the cluster. This includes among others the job jar and the
+        used libraries."""
 
         # Copy jar and lib files to cluster
         files_to_copy = [self.jar_path]
@@ -181,7 +190,12 @@ class HadoopJarJob(object):
         return files_to_copy
 
     def get_command(self, exec_dir="."):
-        """Documentation"""
+        """Return the Hadoop command that executes this job.
+
+        Args:
+          exec_dir (str, optional): The path of the directory where the job is
+            to be executed.
+        """
 
         # Get parameters
         jar_file = os.path.join(exec_dir, os.path.basename(self.jar_path))
@@ -276,6 +290,15 @@ class HadoopCluster(object):
 
         # Create topology
         self.topology = HadoopTopology(hosts, topo_list)
+
+        # Store cluster information
+        self.host_clusters = {}
+        for h in self.hosts:
+            g5k_cluster = get_host_cluster(h)
+            if g5k_cluster in self.host_clusters:
+                self.host_clusters[g5k_cluster].append(h)
+            else:
+                self.host_clusters[g5k_cluster] = [h]
 
         logger.info("Hadoop cluster created with master " + str(self.master) +
                     ", hosts " + str(self.hosts) + " and topology " +
@@ -392,11 +415,14 @@ class HadoopCluster(object):
         # Create topology files
         self.topology.create_files(self.conf_dir)
 
-        # Configure servers and host-dependant parameters
-        self.__configure_servers()
+        for g5k_cluster in self.host_clusters:
+            hosts = self.host_clusters[g5k_cluster]
 
-        # Copy configuration
-        self.__copy_conf(self.conf_dir)
+            # Configure servers and host-dependant parameters
+            self.__configure_servers(hosts)
+
+            # Copy configuration
+            self.__copy_conf(self.conf_dir, hosts)
 
         # Format HDFS
         self.format_dfs()
@@ -416,15 +442,25 @@ class HadoopCluster(object):
             raise HadoopNotInitializedException(
                 "The cluster should be initialized")
 
-    def __configure_servers(self):
+    def __configure_servers(self, hosts=None):
         """Configure servers and host-dependant parameters (TODO - we assume all
            nodes are equal).
+
+           Args:
+             hosts (list of Host, optional): The list of hosts to take into
+               account in the configuration. If not specified, all the hosts of
+               the hadoop cluster are used. The first host of this list is
+               always used as the reference.
         """
 
-        host_attrs = get_host_attributes(self.master)
+        if not hosts:
+            hosts = self.hosts
+
+        host_attrs = get_host_attributes(hosts[0])
         num_cores = host_attrs[u'architecture'][u'smt_size']
-        main_mem = int(host_attrs[u'main_memory'][u'ram_size']) / \
-                   (1024 * 1024 * num_cores)
+        mem_per_slot = (int(host_attrs[u'main_memory'][u'ram_size']) -
+                        2 * 1024 * 1024) / \
+                       (1024 * 1024 * num_cores)
 
         self.__replace_in_file(os.path.join(self.conf_dir, CORE_CONF_FILE),
                                "fs.default.name",
@@ -444,22 +480,31 @@ class HadoopCluster(object):
                                    self.mapred_port), True)
         self.__replace_in_file(os.path.join(self.conf_dir, MR_CONF_FILE),
                                "mapred.tasktracker.map.tasks.maximum",
-                               str(num_cores), True)
+                               str(num_cores - 1), True)
+        self.__replace_in_file(os.path.join(self.conf_dir, MR_CONF_FILE),
+                               "mapred.tasktracker.reduce.tasks.maximum",
+                               str(num_cores - 1), True)
         self.__replace_in_file(os.path.join(self.conf_dir, MR_CONF_FILE),
                                "mapred.child.java.opts",
-                               "-Xmx" + str(main_mem) + "m", True)
+                               "-Xmx" + str(mem_per_slot) + "m", True)
 
-    def __copy_conf(self, conf_dir):
+    def __copy_conf(self, conf_dir, hosts=None):
         """Copy configuration files from given dir to remote dir in cluster
         hosts.
         
         Args:
           conf_dir (str): The remote configuration dir.
+          hosts (list of Host, optional): The list of hosts where the
+            configuration is going to be copied. If not specified, all the hosts
+            of the hadoop cluster are used.
         """
+
+        if not hosts:
+            hosts = self.hosts
 
         conf_files = [os.path.join(conf_dir, f) for f in os.listdir(conf_dir)]
 
-        action = TaktukPut(self.hosts, conf_files, self.hadoop_conf_dir)
+        action = TaktukPut(hosts, conf_files, self.hadoop_conf_dir)
         action.run()
 
         if not action.finished_ok:
@@ -469,45 +514,49 @@ class HadoopCluster(object):
 
     def change_conf(self, params):
         """Modify hadoop configuration. This method copies the configuration
-        files from the master conf dir into a local temporary dir, do all the 
-        changes in place and broadcast the new configuration files to all hosts.
+        files from the first host of each g5k cluster conf dir into a local
+        temporary dir, do all the changes in place and broadcast the new
+        configuration files to all hosts.
         
         Args:
           params (dict of str:str): The parameters to be changed in the form
             key:value.
         """
 
-        # Copy conf files from master
-        action = Remote("ls " + self.hadoop_conf_dir + "/*.xml", [self.master])
-        action.run()
-        output = action.processes[0].stdout
+        for g5k_cluster in self.host_clusters:
+            hosts = self.host_clusters[g5k_cluster]
 
-        remote_conf_files = []
-        for f in output.split():
-            remote_conf_files.append(os.path.join(self.hadoop_conf_dir, f))
+            # Copy conf files from first host in the cluster
+            action = Remote("ls " + self.hadoop_conf_dir + "/*.xml", [hosts[0]])
+            action.run()
+            output = action.processes[0].stdout
 
-        tmp_dir = "/tmp/mliroz_temp_hadoop/"
-        if not os.path.exists(tmp_dir):
-            os.makedirs(tmp_dir)
+            remote_conf_files = []
+            for f in output.split():
+                remote_conf_files.append(os.path.join(self.hadoop_conf_dir, f))
 
-        action = Get([self.master], remote_conf_files, tmp_dir)
-        action.run()
+            tmp_dir = "/tmp/mliroz_temp_hadoop/"
+            if not os.path.exists(tmp_dir):
+                os.makedirs(tmp_dir)
 
-        # Do replacements in temp file
-        temp_conf_files = [os.path.join(tmp_dir, f) for f in
-                           os.listdir(tmp_dir)]
+            action = Get([hosts[0]], remote_conf_files, tmp_dir)
+            action.run()
 
-        for name, value in params.iteritems():
-            for f in temp_conf_files:
-                if self.__replace_in_file(f, name, value):
-                    break
-            else:
-                # Property not found - provisionally add it in MR_CONF_FILE
-                f = os.path.join(tmp_dir, MR_CONF_FILE)
-                self.__replace_in_file(f, name, value, True)
+            # Do replacements in temp file
+            temp_conf_files = [os.path.join(tmp_dir, f) for f in
+                               os.listdir(tmp_dir)]
 
-        # Copy back the files to all hosts
-        self.__copy_conf(tmp_dir)
+            for name, value in params.iteritems():
+                for f in temp_conf_files:
+                    if self.__replace_in_file(f, name, value):
+                        break
+                else:
+                    # Property not found - provisionally add it in MR_CONF_FILE
+                    f = os.path.join(tmp_dir, MR_CONF_FILE)
+                    self.__replace_in_file(f, name, value, True)
+
+            # Copy back the files to all hosts
+            self.__copy_conf(tmp_dir, hosts)
 
     def __replace_in_file(self, f, name, value, create_if_absent=False):
         """Assign the given value to variable name in file f.
