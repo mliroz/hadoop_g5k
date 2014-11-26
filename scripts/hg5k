@@ -7,12 +7,14 @@ import sys
 import threading
 
 from argparse import ArgumentParser, RawTextHelpFormatter
+from pprint import pformat
 
 from execo.action import Get, Put, TaktukRemote
 from execo.host import Host
 from execo.log import style
 from execo.process import SshProcess
 from execo_engine import logger
+from execo_g5k import get_oar_job_nodes, get_oargrid_job_nodes
 
 from hadoop_g5k.cluster import HadoopCluster, HadoopJarJob
 
@@ -97,25 +99,36 @@ if __name__ == "__main__":
 
             return highest_id + 1
 
-    def __generate_hosts(file_name):
+    def __generate_hosts(hosts_input):
         """Generate a list of hosts from the given file.
 
         Args:
-          file_name: The path of the file containing the hosts to be used. Each
-            host should be in a different line. Repeated hosts are pruned.
-            Hint: in Grid5000 $OAR_NODEFILE should be used.
+          hosts_input: The path of the file containing the hosts to be used,
+            or a comma separated list of site:job_id or an oargrid_job_id.
+            If a file is used, each host should be in a different line.
+            Repeated hosts are pruned.
+            Hint: in a running Grid5000 job,  $OAR_NODEFILE should be used.
 
         Return:
           list of Host: The list of hosts.
         """
-
         hosts = []
-
-        for line in open(file_name):
-            h = Host(line.rstrip())
-            if h not in hosts:
-                hosts.append(h)
-
+        if os.path.isfile(hosts_input):
+            for line in open(hosts_input):
+                h = Host(line.rstrip())
+                if h not in hosts:
+                    hosts.append(h)
+        elif ':' in hosts_input:
+            # We assume the string is a comma separated list of site:job_id
+            for job in hosts_input.split(','):
+                site, job_id = job.split(':')
+                hosts += get_oar_job_nodes(int(job_id), site)
+        else:
+            # If the file_name is a number, we assume this is a oargrid_job_id
+            hosts = get_oargrid_job_nodes(int(hosts_input))
+        logger.debug('Hosts list: \n%s',
+                     ' '.join(style.host(host.address.split('.')[0])
+                              for host in hosts))
         return hosts
 
     # Main ####################################################################
