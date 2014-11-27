@@ -17,6 +17,7 @@ from execo_engine import logger
 from execo_g5k import get_oar_job_nodes, get_oargrid_job_nodes
 
 from hadoop_g5k.cluster import HadoopCluster, HadoopJarJob
+from hadoop_g5k.cluster_v2 import HadoopV2Cluster
 
 __user_login = getpass.getuser()
 
@@ -303,7 +304,8 @@ if __name__ == "__main__":
                          metavar="general | files | dfs | dfsblocks | mrjobs",
                          help="Show the cluster state. The output depends on "
                          "optional argument:\n"
-                         "  general    Show general cluster state (default option)\n"
+                         "  general    Show general cluster state"
+                         " (default option)\n"
                          "  files      Show dfs file hierarchy\n" +
                          "  dfs        Show filesystem state\n" +
                          "  dfsblocks  Show dfs blocks information\n" +
@@ -355,8 +357,7 @@ if __name__ == "__main__":
             elif args.version[0].startswith("1."):
                 hadoop_class = HadoopCluster
             elif args.version[0].startswith("2."):
-                logger.error("Cluster for HadoopV2 not implemented yet")
-                sys.exit(2)
+                hadoop_class = HadoopV2Cluster
             else:
                 logger.error("Unknown hadoop version")
                 sys.exit(2)
@@ -412,6 +413,10 @@ if __name__ == "__main__":
             if not os.path.exists(f):
                 logger.error("Local path " + f + " does not exist")
                 sys.exit(4)
+
+        # Create dest directories if needed
+        if hc.get_version().startswith("Hadoop 2."):
+            hc.execute("fs -mkdir -p " + dest, verbose=False)
 
         # Define and create temp dir
         tmp_dir = "/tmp" + dest
@@ -507,14 +512,15 @@ if __name__ == "__main__":
     if args.state:
         if args.state == "general":
 
-            logger.info("---------------------------------------------------------")
+            logger.info("-"*55)
             logger.info(style.user2("Hadoop Cluster with ID " + str(hc_id)))
             logger.info(style.user1("    Version: ") + hc.get_version())
             logger.info(style.user1("    Master: ") + str(hc.master))
             logger.info(style.user1("    Hosts: ") + str(hc.hosts))
             logger.info(style.user1("    Topology: "))
             for h in hc.hosts:
-                logger.info("        " + str(h) + " -> " + str(hc.topology.get_rack(h)))
+                logger.info("        " + str(h) + " -> " +
+                            str(hc.topology.get_rack(h)))
             if hc.initialized:
                 if hc.running:
                     logger.info("The cluster is " + style.user3("running"))
@@ -522,27 +528,37 @@ if __name__ == "__main__":
                     logger.info("The cluster is " + style.user3("stopped"))
             else:
                 logger.info("The cluster is not " + style.user3("initialized"))
-            logger.info("---------------------------------------------------------")
+            logger.info("-"*55)
 
         elif args.state == "files":
-            (stdout, stderr) = hc.execute("fs -lsr /", verbose=False)
+            if hc.get_version().startswith("Hadoop 2."):
+                (stdout, stderr) = hc.execute("fs -ls -R /", verbose=False)
+            else:
+                (stdout, stderr) = hc.execute("fs -lsr /", verbose=False)
             print ""
             for line in stdout.splitlines():
                 if "WARN fs.FileSystem" not in line:
                     print line
             print ""
 
-            (stdout, stderr) = hc.execute("fs -dus /", verbose=False)
-            pos = stdout.rfind("\t")
-            size = int(stdout[pos + 1:])
+            if hc.get_version().startswith("Hadoop 2."):
+                (stdout, stderr) = hc.execute("fs -du -s /", verbose=False)
+                for line in stdout.splitlines():
+                    if "WARN" not in line:
+                        pos = line.rfind("\t")
+                        size = int(line[:pos])
+            else:
+                (stdout, stderr) = hc.execute("fs -dus /", verbose=False)
+                pos = stdout.rfind("\t")
+                size = int(stdout[pos + 1:])
 
             human_readable_size = ""
-            if 1024 < size < 1024*1024:
+            if 1024 < size < 1048576:
                 human_readable_size = " (%.1f KB)" % (float(size)/1024)
-            elif 1024*1024 < size < 1024*1024*1024:
-                human_readable_size = " (%.1f MB)" % (float(size)/(1024*1024))
-            elif size > 1024*1024*1024:
-                human_readable_size = " (%.1f GB)" % (float(size)/(1024*1024*1024))
+            elif 1048576 < size < 1073741824:
+                human_readable_size = " (%.1f MB)" % (float(size)/(1048576))
+            elif size > 1073741824:
+                human_readable_size = " (%.1f GB)" % (float(size)/(1073741824))
 
             print "Total Size = " + str(size) + human_readable_size + "\n"
 

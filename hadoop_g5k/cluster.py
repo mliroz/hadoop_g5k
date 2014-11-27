@@ -465,9 +465,9 @@ class HadoopCluster(object):
 
         host_attrs = get_host_attributes(hosts[0])
         num_cores = host_attrs[u'architecture'][u'smt_size']
-        mem_per_slot = (int(host_attrs[u'main_memory'][u'ram_size']) -
-                        2 * 1024 * 1024) / \
-                       (1024 * 1024 * num_cores)
+        total_memory_mb = (int(host_attrs[u'main_memory'][u'ram_size']) /
+                           (1024 * 1024)) - 2 * 1024
+        mem_per_slot_mb = total_memory_mb / (num_cores - 1)
 
         self._replace_in_file(os.path.join(self.conf_dir, CORE_CONF_FILE),
                               "fs.default.name",
@@ -493,7 +493,7 @@ class HadoopCluster(object):
                               str(num_cores - 1), True)
         self._replace_in_file(os.path.join(self.conf_dir, MR_CONF_FILE),
                               "mapred.child.java.opts",
-                              "-Xmx" + str(mem_per_slot) + "m", True)
+                              "-Xmx" + str(mem_per_slot_mb) + "m", True)
 
     def _copy_conf(self, conf_dir, hosts=None):
         """Copy configuration files from given dir to remote dir in cluster
@@ -881,7 +881,8 @@ class HadoopCluster(object):
 
         for line in job.stdout.splitlines():
             if "Running job" in line:
-                if "mapred.JobClient" in line:  # TODO: more possible formats?
+                if "mapred.JobClient" in line or "mapreduce.Job" in line:
+                    # TODO: more possible formats?
                     try:
                         match = re.match('.*Running job: (.*)', line)
                         job.job_id = match.group(1)
