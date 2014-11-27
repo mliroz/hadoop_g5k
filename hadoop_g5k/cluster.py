@@ -881,8 +881,13 @@ class HadoopCluster(object):
 
         for line in job.stdout.splitlines():
             if "Running job" in line:
-                match = re.match('.*Running job: (.*)', line)
-                job.job_id = match.group(1)
+                if "mapred.JobClient" in line:  # TODO: more possible formats?
+                    try:
+                        match = re.match('.*Running job: (.*)', line)
+                        job.job_id = match.group(1)
+                        break
+                    except:
+                        pass
 
         return (proc.stdout, proc.stderr)
 
