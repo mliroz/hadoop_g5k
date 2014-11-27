@@ -362,6 +362,29 @@ class HadoopCluster(object):
     def initialize(self):
         """Initialize the cluster: copy base configuration and format DFS."""
 
+        self._pre_initialize()
+
+        logger.info("Initializing hadoop")
+
+        # Set basic configuration
+        self._copy_base_conf()
+        self._create_master_and_slave_conf()
+        self.topology.create_files(self.conf_dir)
+
+        # Configure hosts depending on resource type
+        for g5k_cluster in self.host_clusters:
+            hosts = self.host_clusters[g5k_cluster]
+            self._configure_servers(hosts)
+            self._copy_conf(self.conf_dir, hosts)
+
+        # Format HDFS
+        self.format_dfs()
+
+        self.initialized = True
+
+    def _pre_initialize(self):
+        """Clean previous configurations"""
+
         if self.initialized:
             if self.running:
                 self.stop()
@@ -371,9 +394,9 @@ class HadoopCluster(object):
 
         self.initialized = False
 
-        logger.info("Initializing hadoop")
+    def _copy_base_conf(self):
+        """Copy base configuration files to tmp dir."""
 
-        # Copy base configuration files to tmp dir
         self.conf_dir = tempfile.mkdtemp("", "hadoop-", "/tmp")
         if os.path.exists(self.local_base_conf_dir):
             base_conf_files = [os.path.join(self.local_base_conf_dir, f)
@@ -402,7 +425,9 @@ class HadoopCluster(object):
         action = Get([self.master], remote_missing_files, self.conf_dir)
         action.run()
 
-        # Create master and slaves configuration files
+    def _create_master_and_slave_conf(self):
+        """Create master and slaves configuration files."""
+
         master_file = open(self.conf_dir + "/masters", "w")
         master_file.write(self.master.address + "\n")
         master_file.close()
@@ -412,24 +437,7 @@ class HadoopCluster(object):
             slaves_file.write(s.address + "\n")
         slaves_file.close()
 
-        # Create topology files
-        self.topology.create_files(self.conf_dir)
-
-        for g5k_cluster in self.host_clusters:
-            hosts = self.host_clusters[g5k_cluster]
-
-            # Configure servers and host-dependant parameters
-            self.__configure_servers(hosts)
-
-            # Copy configuration
-            self.__copy_conf(self.conf_dir, hosts)
-
-        # Format HDFS
-        self.format_dfs()
-
-        self.initialized = True
-
-    def __check_initialization(self):
+    def _check_initialization(self):
         """ Check whether the cluster is initialized and raise and exception if
         not.
         
@@ -442,9 +450,8 @@ class HadoopCluster(object):
             raise HadoopNotInitializedException(
                 "The cluster should be initialized")
 
-    def __configure_servers(self, hosts=None):
-        """Configure servers and host-dependant parameters (TODO - we assume all
-           nodes are equal).
+    def _configure_servers(self, hosts=None):
+        """Configure servers and host-dependant parameters.
 
            Args:
              hosts (list of Host, optional): The list of hosts to take into
@@ -462,33 +469,33 @@ class HadoopCluster(object):
                         2 * 1024 * 1024) / \
                        (1024 * 1024 * num_cores)
 
-        self.__replace_in_file(os.path.join(self.conf_dir, CORE_CONF_FILE),
-                               "fs.default.name",
-                               "hdfs://" + self.master.address + ":" + str(
-                                   self.hdfs_port) + "/",
-                               True)
-        self.__replace_in_file(os.path.join(self.conf_dir, CORE_CONF_FILE),
-                               "hadoop.tmp.dir",
-                               self.hadoop_temp_dir, True)
-        self.__replace_in_file(os.path.join(self.conf_dir, CORE_CONF_FILE),
-                               "topology.script.file.name",
-                               self.hadoop_conf_dir + "/topo.sh", True)
+        self._replace_in_file(os.path.join(self.conf_dir, CORE_CONF_FILE),
+                              "fs.default.name",
+                              "hdfs://" + self.master.address + ":" +
+                                          str(self.hdfs_port) + "/",
+                              True)
+        self._replace_in_file(os.path.join(self.conf_dir, CORE_CONF_FILE),
+                              "hadoop.tmp.dir",
+                              self.hadoop_temp_dir, True)
+        self._replace_in_file(os.path.join(self.conf_dir, CORE_CONF_FILE),
+                              "topology.script.file.name",
+                              self.hadoop_conf_dir + "/topo.sh", True)
 
-        self.__replace_in_file(os.path.join(self.conf_dir, MR_CONF_FILE),
-                               "mapred.job.tracker",
-                               self.master.address + ":" + str(
-                                   self.mapred_port), True)
-        self.__replace_in_file(os.path.join(self.conf_dir, MR_CONF_FILE),
-                               "mapred.tasktracker.map.tasks.maximum",
-                               str(num_cores - 1), True)
-        self.__replace_in_file(os.path.join(self.conf_dir, MR_CONF_FILE),
-                               "mapred.tasktracker.reduce.tasks.maximum",
-                               str(num_cores - 1), True)
-        self.__replace_in_file(os.path.join(self.conf_dir, MR_CONF_FILE),
-                               "mapred.child.java.opts",
-                               "-Xmx" + str(mem_per_slot) + "m", True)
+        self._replace_in_file(os.path.join(self.conf_dir, MR_CONF_FILE),
+                              "mapred.job.tracker",
+                              self.master.address + ":" +
+                              str(self.mapred_port), True)
+        self._replace_in_file(os.path.join(self.conf_dir, MR_CONF_FILE),
+                              "mapred.tasktracker.map.tasks.maximum",
+                              str(num_cores - 1), True)
+        self._replace_in_file(os.path.join(self.conf_dir, MR_CONF_FILE),
+                              "mapred.tasktracker.reduce.tasks.maximum",
+                              str(num_cores - 1), True)
+        self._replace_in_file(os.path.join(self.conf_dir, MR_CONF_FILE),
+                              "mapred.child.java.opts",
+                              "-Xmx" + str(mem_per_slot) + "m", True)
 
-    def __copy_conf(self, conf_dir, hosts=None):
+    def _copy_conf(self, conf_dir, hosts=None):
         """Copy configuration files from given dir to remote dir in cluster
         hosts.
         
@@ -548,17 +555,17 @@ class HadoopCluster(object):
 
             for name, value in params.iteritems():
                 for f in temp_conf_files:
-                    if self.__replace_in_file(f, name, value):
+                    if self._replace_in_file(f, name, value):
                         break
                 else:
                     # Property not found - provisionally add it in MR_CONF_FILE
                     f = os.path.join(tmp_dir, MR_CONF_FILE)
-                    self.__replace_in_file(f, name, value, True)
+                    self._replace_in_file(f, name, value, True)
 
             # Copy back the files to all hosts
-            self.__copy_conf(tmp_dir, hosts)
+            self._copy_conf(tmp_dir, hosts)
 
-    def __replace_in_file(self, f, name, value, create_if_absent=False):
+    def _replace_in_file(self, f, name, value, create_if_absent=False):
         """Assign the given value to variable name in file f.
         
         Args:
@@ -633,7 +640,7 @@ class HadoopCluster(object):
     def start(self):
         """Start the namenode and then the jobtracker."""
 
-        self.__check_initialization()
+        self._check_initialization()
 
         self.start_dfs()
         self.start_map_reduce()
@@ -644,7 +651,7 @@ class HadoopCluster(object):
         """Start the namenode and then the jobtracker. Wait for them to exit
         safemode before continuing."""
 
-        self.__check_initialization()
+        self._check_initialization()
 
         self.start_dfs_and_wait()
         self.start_map_reduce_and_wait()
@@ -654,7 +661,7 @@ class HadoopCluster(object):
     def start_dfs(self):
         """Start the namenode."""
 
-        self.__check_initialization()
+        self._check_initialization()
 
         logger.info("Starting HDFS")
 
@@ -674,7 +681,7 @@ class HadoopCluster(object):
     def start_dfs_and_wait(self):
         """Start the namenode and wait for it to exit safemode."""
 
-        self.__check_initialization()
+        self._check_initialization()
 
         self.start_dfs()
 
@@ -692,7 +699,7 @@ class HadoopCluster(object):
     def start_map_reduce(self):
         """Start the jobtracker."""
 
-        self.__check_initialization()
+        self._check_initialization()
 
         logger.info("Starting MapReduce")
 
@@ -712,7 +719,7 @@ class HadoopCluster(object):
     def start_map_reduce_and_wait(self):
         """Start the jobtracker and wait for it to exit safemode."""
 
-        self.__check_initialization()
+        self._check_initialization()
 
         self.start_map_reduce()
 
@@ -727,7 +734,7 @@ class HadoopCluster(object):
     def stop(self):
         """Stop the jobtracker and then the namenode."""
 
-        self.__check_initialization()
+        self._check_initialization()
 
         self.stop_map_reduce()
         self.stop_dfs()
@@ -737,7 +744,7 @@ class HadoopCluster(object):
     def stop_dfs(self):
         """Stop the namenode."""
 
-        self.__check_initialization()
+        self._check_initialization()
 
         logger.info("Stopping HDFS")
 
@@ -753,7 +760,7 @@ class HadoopCluster(object):
     def stop_map_reduce(self):
         """Stop the jobtracker."""
 
-        self.__check_initialization()
+        self._check_initialization()
 
         logger.info("Stopping MapReduce")
 
@@ -796,7 +803,7 @@ class HadoopCluster(object):
             is displayed. (default: True)
         """
 
-        self.__check_initialization()
+        self._check_initialization()
 
         if should_be_running and not self.running:
             logger.warn("The cluster was stopped. Starting it automatically")
@@ -832,7 +839,7 @@ class HadoopCluster(object):
             is displayed. (default: True)          
         """
 
-        self.__check_initialization()
+        self._check_initialization()
 
         if not self.running:
             logger.warn("The cluster was stopped. Starting it automatically")
