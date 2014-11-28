@@ -1,3 +1,4 @@
+import getpass
 import os
 import tempfile
 from execo import Get, Remote
@@ -210,7 +211,7 @@ class HadoopV2Cluster(HadoopCluster):
         self.running = False        
         
     def stop_yarn(self):
-        """Documentation"""
+        """Stop the YARN server."""
         
         self._check_initialization()
 
@@ -232,4 +233,51 @@ class HadoopV2Cluster(HadoopCluster):
           dest (str): the path of the local dir where the logs will be copied.
         """
 
-        # TODO: how history is stocked in hadoop v2?
+        if not os.path.exists(dest):
+            logger.warning("Destination directory " + dest +
+                           " does not exist. It will be created")
+            os.makedirs(dest)
+
+        # Dirs used
+        user_login = getpass.getuser()
+        hist_dfs_dir = "/tmp/hadoop-yarn/staging/history/done_intermediate/" + \
+                   user_login
+        hist_tmp_dir = "/tmp/hadoop_hist"
+
+        # Remove file in tmp dir if exists
+        proc = SshProcess("rm -rf " + hist_tmp_dir, self.master)
+        proc.run()
+
+        # Get files in master
+        if job_ids:
+            proc = SshProcess("mkdir " + hist_tmp_dir, self.master)
+            proc.run()
+            for jid in job_ids:
+                self.execute("fs -get " + hist_dfs_dir + "/" + jid + "* " +
+                             hist_tmp_dir, verbose=False)
+        else:
+            self.execute("fs -get " + hist_dfs_dir + " " + hist_tmp_dir,
+                         verbose=False)
+
+        # Copy files from master
+        action = Get([self.master], [hist_tmp_dir], dest)
+        action.run()
+
+    def clean_history(self):
+        """Remove history."""
+
+        logger.info("Cleaning history")
+
+        restop = False
+        if not self.running:
+            logger.warn("The cluster needs to be running before cleaning.")
+            self.start()
+            restop = True
+
+        user_login = getpass.getuser()
+        hist_dfs_dir = "/tmp/hadoop-yarn/staging/history/done_intermediate/" + \
+                   user_login
+        self.execute("fs -rm -R " + hist_dfs_dir, verbose=False)
+
+        if restop:
+            self.stop()
