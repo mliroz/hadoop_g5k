@@ -45,7 +45,7 @@ class MacroException(ParameterException):
 class MacroManager(object):
 
     def __init__(self):
-        """Crate a new MacroManager object."""
+        """Create a new MacroManager object."""
 
         self.dep_graph = DiGraph()
 
@@ -132,7 +132,7 @@ class MacroManager(object):
         self.xp_params = self.xp_params.union(params)
 
     def add_dependency(self, m1, m2):
-        """Includes a new macro dependency: m1 -> m2. This means that to obtain
+        """Include a new macro dependency: m1 -> m2. This means that to obtain
         the value of m2 we use the value of m1.
         
         Args:
@@ -226,7 +226,7 @@ class MacroManager(object):
 
 
 class HadoopEngine(Engine):
-    """This class manages thw whole workflow of a hadoop test suite."""
+    """This class manages the whole workflow of a hadoop test suite."""
 
     def __init__(self):
         self.frontend = None

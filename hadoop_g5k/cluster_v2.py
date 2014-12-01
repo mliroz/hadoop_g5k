@@ -27,7 +27,14 @@ DEFAULT_HADOOP_LOCAL_CONF_DIR = "conf"
 
 
 class HadoopV2Cluster(HadoopCluster):
-    
+    """This class manages the whole life-cycle of a hadoop cluster with version
+    2 or higher.
+
+    It adds some functionality over HadoopCluster: the YARN server can be
+    managed independently. It also warns when trying to use functionality no
+    longer supported by this version of Hadoop.
+    """
+
     # Cluster state
     running_yarn = False    
     
@@ -110,56 +117,56 @@ class HadoopV2Cluster(HadoopCluster):
         mem_per_task_mb = total_memory_mb / (num_cores - 1)
 
         self._replace_in_file(os.path.join(self.conf_dir, CORE_CONF_FILE),
-                               "fs.defaultFS",
-                               "hdfs://" + self.master.address + ":" +
-                                           str(self.hdfs_port) + "/",
-                               True)
+                              "fs.defaultFS",
+                              "hdfs://" + self.master.address + ":" +
+                                          str(self.hdfs_port) + "/",
+                              True)
         self._replace_in_file(os.path.join(self.conf_dir, CORE_CONF_FILE),
-                               "hadoop.tmp.dir",
-                               self.hadoop_temp_dir, True)
+                              "hadoop.tmp.dir",
+                              self.hadoop_temp_dir, True)
         self._replace_in_file(os.path.join(self.conf_dir, CORE_CONF_FILE),
-                               "topology.script.file.name",
-                               self.hadoop_conf_dir + "/topo.sh", True)
+                              "topology.script.file.name",
+                              self.hadoop_conf_dir + "/topo.sh", True)
 
         self._replace_in_file(os.path.join(self.conf_dir, MR_CONF_FILE),
-                               "mapreduce.framework.name","yarn", True)
+                              "mapreduce.framework.name", "yarn", True)
         self._replace_in_file(os.path.join(self.conf_dir, MR_CONF_FILE),
-                               "mapreduce.map.memory.mb",
-                               str(mem_per_task_mb), True)
+                              "mapreduce.map.memory.mb",
+                              str(mem_per_task_mb), True)
         self._replace_in_file(os.path.join(self.conf_dir, MR_CONF_FILE),
-                               "mapreduce.map.java.opts",
-                               "-Xmx" + str(mem_per_task_mb) + "m", True)
+                              "mapreduce.map.java.opts",
+                              "-Xmx" + str(mem_per_task_mb) + "m", True)
         self._replace_in_file(os.path.join(self.conf_dir, MR_CONF_FILE),
-                               "mapreduce.map.cpu.vcores","1", True)
+                              "mapreduce.map.cpu.vcores", "1", True)
         self._replace_in_file(os.path.join(self.conf_dir, MR_CONF_FILE),
-                               "mapreduce.reduce.memory.mb",
-                               str(mem_per_task_mb), True)
+                              "mapreduce.reduce.memory.mb",
+                              str(mem_per_task_mb), True)
         self._replace_in_file(os.path.join(self.conf_dir, MR_CONF_FILE),
-                               "mapreduce.reduce.cpu.vcores","1", True)
+                              "mapreduce.reduce.cpu.vcores", "1", True)
         self._replace_in_file(os.path.join(self.conf_dir, MR_CONF_FILE),
-                               "mapreduce.reduce.java.opts",
-                               "-Xmx" + str(mem_per_task_mb) + "m", True)
+                              "mapreduce.reduce.java.opts",
+                              "-Xmx" + str(mem_per_task_mb) + "m", True)
 
         self._replace_in_file(os.path.join(self.conf_dir, YARN_CONF_FILE),
-                               "yarn.resourcemanager.address",
-                               self.master.address + ":" +
-                               str(self.mapred_port), True)
+                              "yarn.resourcemanager.address",
+                              self.master.address + ":" +
+                              str(self.mapred_port), True)
         self._replace_in_file(os.path.join(self.conf_dir, YARN_CONF_FILE),
-                               "yarn.nodemanager.resource.memory-mb",
-                               str(total_memory_mb), True)
+                              "yarn.nodemanager.resource.memory-mb",
+                              str(total_memory_mb), True)
         self._replace_in_file(os.path.join(self.conf_dir, YARN_CONF_FILE),
-                               "yarn.nodemanager.resource.cpu-vcores",
-                               str(num_cores - 1), True)
+                              "yarn.nodemanager.resource.cpu-vcores",
+                              str(num_cores - 1), True)
         self._replace_in_file(os.path.join(self.conf_dir, YARN_CONF_FILE),
-                               "yarn.nodemanager.aux-services",
-                               "mapreduce_shuffle", True)
+                              "yarn.nodemanager.aux-services",
+                              "mapreduce_shuffle", True)
 
     def bootstrap(self, hadoop_tar_file):
         super(HadoopV2Cluster, self).bootstrap(hadoop_tar_file)
 
         action = Remote("cp " + os.path.join(self.hadoop_conf_dir,
                                              MR_CONF_FILE + ".template ") +
-                                os.path.join(self.hadoop_conf_dir, MR_CONF_FILE),
+                        os.path.join(self.hadoop_conf_dir, MR_CONF_FILE),
                         self.hosts)
         action.run()
 
@@ -199,6 +206,18 @@ class HadoopV2Cluster(HadoopCluster):
             logger.warn("Error while starting YARN")
         else:
             self.running_yarn = True
+
+    def start_map_reduce(self):
+        """Do nothing. MapReduce has no specific service in Hadoop 2.*"""
+
+        logger.warn("MapReduce does not use any specific service in this "
+                    "version of Hadoop.")
+
+    def start_map_reduce_and_wait(self):
+        """Do nothing. MapReduce has no specific service in Hadoop 2.*"""
+
+        logger.warn("MapReduce does not use any specific service in this "
+                    "version of Hadoop.")
         
     def stop(self):
         """Stop the jobtracker and then the namenode."""
@@ -226,6 +245,12 @@ class HadoopV2Cluster(HadoopCluster):
         else:
             self.running_yarn = False
 
+    def stop_map_reduce(self):
+        """Do nothing. MapReduce has no specific service in Hadoop 2.*"""
+
+        logger.warn("MapReduce does not use any specific service in this "
+                    "version of Hadoop.")
+
     def copy_history(self, dest, job_ids=None):
         """Copy history logs from dfs.
 
@@ -241,7 +266,7 @@ class HadoopV2Cluster(HadoopCluster):
         # Dirs used
         user_login = getpass.getuser()
         hist_dfs_dir = "/tmp/hadoop-yarn/staging/history/done_intermediate/" + \
-                   user_login
+                       user_login
         hist_tmp_dir = "/tmp/hadoop_hist"
 
         # Remove file in tmp dir if exists
@@ -276,7 +301,7 @@ class HadoopV2Cluster(HadoopCluster):
 
         user_login = getpass.getuser()
         hist_dfs_dir = "/tmp/hadoop-yarn/staging/history/done_intermediate/" + \
-                   user_login
+                       user_login
         self.execute("fs -rm -R " + hist_dfs_dir, verbose=False)
 
         if restop:

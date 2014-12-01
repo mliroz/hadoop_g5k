@@ -3,23 +3,27 @@ import threading
 
 from abc import ABCMeta, abstractmethod
 
-from execo.action import Put, Remote, TaktukRemote
+from execo.action import Put, TaktukRemote
 from execo.process import SshProcess
 from execo_engine import logger
-from hadoop_g5k.cluster import HadoopCluster, HadoopJarJob
+from hadoop_g5k.cluster import HadoopJarJob
 from hadoop_g5k.util import import_function
 
 
 class Dataset(object):
+    """This class defines the methods of a dataset, a set of files that can be
+    loaded or generated into the dfs and then cleaned.
+    """
+
     __metaclass__ = ABCMeta
 
     deployments = {}
 
     def __init__(self, params):
-        """Create a dataset with the given params
+        """Create a dataset with the given params.
         
         Args:
-          params (dict): Parameters of the dataset
+          params (dict): Parameters of the dataset.
         
         """
 
@@ -70,7 +74,7 @@ class StaticDataset(Dataset):
             - local_path: The path to the directory where the dataset is stored
                           locally.
             - pre_load_function: A function to be applied after transfers and
-                                 before uploading to dfs (usually decompression).
+                                 before loading to dfs (usually decompression).
         """
 
         super(StaticDataset, self).__init__(params)

@@ -1,5 +1,3 @@
-"""hadoop_g5k: Hadoop cluster management in Grid5000."""
-
 import getpass
 import os
 import re
@@ -51,7 +49,7 @@ class HadoopTopology(object):
     def __init__(self, hosts, topo_list=None):
         """Create a hadoop topology object assigning each host to the
         corresponding rack.
-        
+
         Args:
           hosts (list of Host): The hosts to be assigned a topology.
           topo_list (list of str, optional): The racks to be assigned to each
@@ -143,6 +141,17 @@ echo $output
 
 
 class HadoopJarJob(object):
+    """This class represents a Hadoop MapReduce job to be executed from a jar
+    file.
+
+    Attributes:
+      state (int): State of the job.
+      job_id (str): Hadoop job identifier or "unknown" if it have not been yet
+        assigned.
+      success (bool): Indicates whether the job have finished successfully or
+        not. Before executing its value is None.
+    """
+
     state = -1
     job_id = "unknown"
     success = None
@@ -219,6 +228,10 @@ class HadoopJarJob(object):
 
 class HadoopCluster(object):
     """This class manages the whole life-cycle of a hadoop cluster.
+
+    HadoopCluster defines the default behavior of a Hadoop Cluster and is
+    designed to work with Hadoop 0.* and Hadoop 1.*. For Hadoop 2.* the subclass
+    HadoopV2Cluster should be used instead.
     
     Attributes:
       master (Host): The host selected as the master. It runs the namenode and
@@ -233,7 +246,6 @@ class HadoopCluster(object):
       running_dfs (bool): True if the namenode is running, False otherwise.  
       running_map_reduce (bool): True if the jobtracker is running, False
         otherwise.
-        
     """
 
     # Cluster state
@@ -260,8 +272,7 @@ class HadoopCluster(object):
         Args:
           hosts (list of Host): The hosts to be assigned a topology.
           topo_list (list of str, optional): The racks to be assigned to each
-            host. len(hosts) should be equal to len(topo_list)
-            Second line of description should be indented.
+            host. len(hosts) should be equal to len(topo_list).
           configFile (str, optional): The path of the config file to be used.
         """
 
@@ -790,8 +801,8 @@ class HadoopCluster(object):
 
     def execute(self, command, node=None, should_be_running=True,
                 verbose=True):
-        """Execute the given command in the given node.
-        
+        """Execute the given Hadoop command in the given node.
+
         Args:
           command (str): The command to be executed.
           node (Host, optional): The host were the command should be executed.
@@ -801,6 +812,10 @@ class HadoopCluster(object):
             running, it is automatically started. (default: True)
           verbose: (bool, optional): If True stdout and stderr of remote process
             is displayed. (default: True)
+
+        Returns:
+          tuple of str: A tuple with the standard and error outputs of the
+            process executing the command.
         """
 
         self._check_initialization()
@@ -831,12 +846,18 @@ class HadoopCluster(object):
         return (proc.stdout, proc.stderr)
 
     def execute_jar(self, job, node=None, verbose=True):
-        """Execute the given mapreduce job included in the given jar.
+        """Execute the given MapReduce job in the specified node.
         
         Args:
           job (HadoopJarJob): The job object.
+          node (Host, optional): The host were the command should be executed.
+            If not provided, self.master is chosen.
           verbose: (bool, optional): If True stdout and stderr of remote process
-            is displayed. (default: True)          
+            is displayed. (default: True)
+
+        Returns:
+          tuple of str: A tuple with the standard and error outputs of the
+            process executing the job.
         """
 
         self._check_initialization()
@@ -1048,5 +1069,3 @@ class HadoopCluster(object):
         proc.run()
         version = proc.stdout.splitlines()[0]
         return version
-
-        # End HadoopCluster ####################################################
