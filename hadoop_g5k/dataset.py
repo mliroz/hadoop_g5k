@@ -34,9 +34,12 @@ class Dataset(object):
         """Load the dataset in the given dfs folder.
         
         Args:
-          hc (HadoopCluster): The hadoop cluster where to deploy the dataset.
-          dest (str): The dfs destination folder.
-          desired_size (int, optional): The size of the data to be copied.
+          hc (HadoopCluster):
+            The Hadoop cluster where to deploy the dataset.
+          dest (str):
+            The dfs destination folder.
+          desired_size (int, optional):
+            The size of the data to be copied.
         """
 
         self.deployments[hc, desired_size] = dest
@@ -45,8 +48,8 @@ class Dataset(object):
         """Remove the dataset from dfs.
         
         Args:
-          hc (HadoopCluster): The hadoop cluster where the dataset has been
-          deployed.
+          hc (HadoopCluster):
+            The Hadoop cluster where the dataset has been deployed.
         """
 
         removed = False
@@ -69,8 +72,9 @@ class StaticDataset(Dataset):
         """Create a static dataset with the given params.
         
         Args:
-          params (dict): A dictionary with the parameters. This dataset needs
-            the following parameters:
+          params (dict):
+            A dictionary with the parameters. This dataset needs the following
+            parameters:
             - local_path: The path to the directory where the dataset is stored
                           locally.
             - pre_load_function: A function to be applied after transfers and
@@ -96,11 +100,14 @@ class StaticDataset(Dataset):
         local folder.
         
         Args:
-          hc (HadoopCluster): The hadoop cluster where to deploy the dataset.
-          dest (str): The dfs destination folder.
-          desired_size (int, optional): The size of the data to be copied. If
-            indicated only the first files of the dataset up to the given size
-            are copied, if not, the whole dataset is transferred.
+          hc (HadoopCluster):
+            The Hadoop cluster where to deploy the dataset.
+          dest (str):
+            The dfs destination folder.
+          desired_size (int, optional):
+            The size of the data to be copied. If indicated only the first files
+            of the dataset up to the given size are copied, if not, the whole
+            dataset is transferred.
         """
 
         dataset_files = [os.path.join(self.local_path, f) for f in
@@ -206,15 +213,16 @@ class StaticDataset(Dataset):
 
 class DynamicDataset(Dataset):
     """This class manages a dynamic dataset, i.e., a dataset that is created
-    dynamically by a hadoop job.
+    dynamically by a Hadoop job.
     """
 
     def __init__(self, params):
-        """Create a dynamic dataset with the given params
+        """Create a dynamic dataset with the given params.
         
         Args:
-          params (dict): A dictionary with the parameters. This dataset needs
-            the following parameters:
+          params (dict):
+            A dictionary with the parameters. This dataset needs the following
+            parameters:
             - job.jar: The path to the jar containing the job to be executed.
             - job.params: The set of params of the job.
             - job.libjars: The list of jars to be used as libraries.
@@ -245,9 +253,12 @@ class DynamicDataset(Dataset):
         dynamically.
         
         Args:
-          hc (HadoopCluster): The hadoop cluster where to deploy the dataset.
-          dest (str): The dfs destination folder.
-          desired_size (int, optional): The size of the data to be copied.
+          hc (HadoopCluster):
+            The Hadoop cluster where to deploy the dataset.
+          dest (str):
+            The dfs destination folder.
+          desired_size (int, optional):
+            The size of the data to be copied.
         """
 
         hc.execute_jar(self.job)

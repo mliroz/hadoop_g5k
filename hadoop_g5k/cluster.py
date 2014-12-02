@@ -47,14 +47,15 @@ class HadoopTopology(object):
     """This class is able to produce and manage a Hadoop topology."""
 
     def __init__(self, hosts, topo_list=None):
-        """Create a hadoop topology object assigning each host to the
+        """Create a Hadoop topology object assigning each host to the
         corresponding rack.
 
         Args:
-          hosts (list of Host): The hosts to be assigned a topology.
-          topo_list (list of str, optional): The racks to be assigned to each
-            host. len(hosts) should be equal to len(topo_list)
-            Second line of description should be indented.
+          hosts (list of Host):
+            The hosts to be assigned a topology.
+          topo_list (list of str, optional):
+            The racks to be assigned to each host. len(hosts) should be equal to
+            len(topo_list).
         """
 
         if topo_list:
@@ -78,10 +79,11 @@ class HadoopTopology(object):
         """Return the rack corresponding to a host.
         
         Args:
-          host (Host): The host whose rack is queried.
+          host (Host):
+            The host whose rack is queried.
           
-        Returns:
-          str: The rack corresponding to the given host.
+        Returns (str):
+          The rack corresponding to the given host.
           
         """
 
@@ -96,7 +98,13 @@ class HadoopTopology(object):
         the topology in Hadoop.
         
         Args:
-          dest (str): The name of the directory where the files will be created.
+          dest (str):
+            The name of the directory where the files will be created.
+          data_file (str, optional):
+            The name of the file containing the rack associated to each node.
+          script_file (str, optional):
+            The name of the file with the script that will be used by Hadoop to
+            determine the rack of the nodes.
         """
 
         # Create topology data file
@@ -145,11 +153,19 @@ class HadoopJarJob(object):
     file.
 
     Attributes:
-      state (int): State of the job.
-      job_id (str): Hadoop job identifier or "unknown" if it have not been yet
-        assigned.
-      success (bool): Indicates whether the job have finished successfully or
-        not. Before executing its value is None.
+      jar_path (str):
+        The local path of the jar containing the job.
+      params (list of str):
+        The list of parameters of the job.
+      lib_paths (list of str):
+        The list of local paths to the libraries used by the job.
+      state (int):
+        State of the job.
+      job_id (str):
+        Hadoop job identifier or "unknown" if it have not been yet assigned.
+      success (bool):
+        Indicates whether the job have finished successfully or not. Before
+        executing its value is None.
     """
 
     state = -1
@@ -160,10 +176,12 @@ class HadoopJarJob(object):
         """Creates a new Hadoop MapReduce jar job with the given parameters.
 
         Args:
-          jar_path (str): The local path of the jar containing the job.
-          params (list of str, optional): The list of parameters of the job.
-          lib_paths (list of str, optional): The list of local paths to the
-            libraries used by the job.
+          jar_path (str):
+            The local path of the jar containing the job.
+          params (list of str, optional):
+            The list of parameters of the job.
+          lib_paths (list of str, optional):
+            The list of local paths to the libraries used by the job.
         """
 
         if not params:
@@ -202,8 +220,8 @@ class HadoopJarJob(object):
         """Return the Hadoop command that executes this job.
 
         Args:
-          exec_dir (str, optional): The path of the directory where the job is
-            to be executed.
+          exec_dir (str, optional):
+            The path of the directory where the job is to be executed.
         """
 
         # Get parameters
@@ -227,25 +245,29 @@ class HadoopJarJob(object):
 
 
 class HadoopCluster(object):
-    """This class manages the whole life-cycle of a hadoop cluster.
+    """This class manages the whole life-cycle of a Hadoop cluster.
 
     HadoopCluster defines the default behavior of a Hadoop Cluster and is
     designed to work with Hadoop 0.* and Hadoop 1.*. For Hadoop 2.* the subclass
     HadoopV2Cluster should be used instead.
     
     Attributes:
-      master (Host): The host selected as the master. It runs the namenode and
+      master (Host):
+        The host selected as the master. It runs the namenode and
         jobtracker.
-      hosts (list of Hosts): List of hosts composing the cluster. All run
-        datanode and tasktracker processes.
-      topology (HadoopTopology): The topology of the cluster hosts.
-      initialized (bool): True if the cluster has been initialized, False
-        otherwise.
-      running (bool): True if both the namenode and jobtracker are running,
-        False otherwise.
-      running_dfs (bool): True if the namenode is running, False otherwise.  
-      running_map_reduce (bool): True if the jobtracker is running, False
-        otherwise.
+      hosts (list of Hosts):
+        List of hosts composing the cluster. All run datanode and tasktracker
+        processes.
+      topology (HadoopTopology):
+        The topology of the cluster hosts.
+      initialized (bool):
+        True if the cluster has been initialized, False otherwise.
+      running (bool):
+        True if both the namenode and jobtracker are running, False otherwise.
+      running_dfs (bool):
+        True if the namenode is running, False otherwise.
+      running_map_reduce (bool):
+        True if the jobtracker is running, False otherwise.
     """
 
     # Cluster state
@@ -270,10 +292,13 @@ class HadoopCluster(object):
         """Create a new Hadoop cluster with the given hosts and topology.
         
         Args:
-          hosts (list of Host): The hosts to be assigned a topology.
-          topo_list (list of str, optional): The racks to be assigned to each
-            host. len(hosts) should be equal to len(topo_list).
-          configFile (str, optional): The path of the config file to be used.
+          hosts (list of Host):
+            The hosts to be assigned a topology.
+          topo_list (list of str, optional):
+            The racks to be assigned to each host. len(hosts) should be equal to
+            len(topo_list).
+          configFile (str, optional):
+            The path of the config file to be used.
         """
 
         # Load cluster properties
@@ -316,10 +341,11 @@ class HadoopCluster(object):
                     str(self.topology))
 
     def bootstrap(self, hadoop_tar_file):
-        """Install hadoop in all cluster nodes from the specified tar.gz file.
+        """Install Hadoop in all cluster nodes from the specified tar.gz file.
         
         Args:
-          hadoop_tar_file (str): The file containing hadoop binaries.
+          hadoop_tar_file (str):
+            The file containing Hadoop binaries.
         """
 
         # 1. Remove used dirs if existing
@@ -453,7 +479,8 @@ class HadoopCluster(object):
         not.
         
         Raises:
-          HadoopNotInitializedException: If self.initialized = False
+          HadoopNotInitializedException:
+            If self.initialized = False
         """
 
         if not self.initialized:
@@ -465,10 +492,10 @@ class HadoopCluster(object):
         """Configure servers and host-dependant parameters.
 
            Args:
-             hosts (list of Host, optional): The list of hosts to take into
-               account in the configuration. If not specified, all the hosts of
-               the hadoop cluster are used. The first host of this list is
-               always used as the reference.
+             hosts (list of Host, optional):
+               The list of hosts to take into account in the configuration. If
+               not specified, all the hosts of the Hadoop cluster are used. The
+               first host of this list is always used as the reference.
         """
 
         if not hosts:
@@ -511,10 +538,11 @@ class HadoopCluster(object):
         hosts.
         
         Args:
-          conf_dir (str): The remote configuration dir.
-          hosts (list of Host, optional): The list of hosts where the
-            configuration is going to be copied. If not specified, all the hosts
-            of the hadoop cluster are used.
+          conf_dir (str):
+            The remote configuration dir.
+          hosts (list of Host, optional):
+            The list of hosts where the configuration is going to be copied. If
+            not specified, all the hosts of the Hadoop cluster are used.
         """
 
         if not hosts:
@@ -531,14 +559,14 @@ class HadoopCluster(object):
                 action.kill()
 
     def change_conf(self, params):
-        """Modify hadoop configuration. This method copies the configuration
+        """Modify Hadoop configuration. This method copies the configuration
         files from the first host of each g5k cluster conf dir into a local
         temporary dir, do all the changes in place and broadcast the new
         configuration files to all hosts.
         
         Args:
-          params (dict of str:str): The parameters to be changed in the form
-            key:value.
+          params (dict of str:str):
+            The parameters to be changed in the form key:value.
         """
 
         for g5k_cluster in self.host_clusters:
@@ -580,14 +608,18 @@ class HadoopCluster(object):
         """Assign the given value to variable name in file f.
         
         Args:
-          f (str): The path of the configuration file.
-          name (str): The name of the variable.
-          value (str): The new value to be assigned:
-          create_if_absent (bool, optional): If True, the variable will be
-            created at the end of the file in case it was not already present.
+          f (str):
+            The path of the configuration file.
+          name (str):
+            The name of the variable.
+          value (str):
+            The new value to be assigned:
+          create_if_absent (bool, optional):
+            If True, the variable will be created at the end of the file in case
+            it was not already present.
         
-        Returns:
-          bool: True if the assignment has been made, False otherwise.
+        Returns (bool):
+          True if the assignment has been made, False otherwise.
         """
 
         changed = False
@@ -804,18 +836,20 @@ class HadoopCluster(object):
         """Execute the given Hadoop command in the given node.
 
         Args:
-          command (str): The command to be executed.
-          node (Host, optional): The host were the command should be executed.
-            If not provided, self.master is chosen.
-          should_be_running (bool, optional): True if the cluster needs to be
-            running in order to execute the command. If so, and it is not
-            running, it is automatically started. (default: True)
-          verbose: (bool, optional): If True stdout and stderr of remote process
-            is displayed. (default: True)
+          command (str):
+            The command to be executed.
+          node (Host, optional):
+            The host were the command should be executed. If not provided,
+            self.master is chosen.
+          should_be_running (bool, optional):
+            True if the cluster needs to be running in order to execute the
+            command. If so, and it is not running, it is automatically started.
+          verbose: (bool, optional):
+            If True stdout and stderr of remote process is displayed.
 
-        Returns:
-          tuple of str: A tuple with the standard and error outputs of the
-            process executing the command.
+        Returns (tuple of str):
+          A tuple with the standard and error outputs of the process executing
+          the command.
         """
 
         self._check_initialization()
@@ -849,15 +883,17 @@ class HadoopCluster(object):
         """Execute the given MapReduce job in the specified node.
         
         Args:
-          job (HadoopJarJob): The job object.
-          node (Host, optional): The host were the command should be executed.
-            If not provided, self.master is chosen.
-          verbose: (bool, optional): If True stdout and stderr of remote process
-            is displayed. (default: True)
+          job (HadoopJarJob):
+            The job object.
+          node (Host, optional):
+            The host were the command should be executed. If not provided,
+            self.master is chosen.
+          verbose (bool, optional):
+            If True stdout and stderr of remote process is displayed.
 
-        Returns:
-          tuple of str: A tuple with the standard and error outputs of the
-            process executing the job.
+        Returns (tuple of str):
+          A tuple with the standard and error outputs of the process executing
+          the job.
         """
 
         self._check_initialization()
@@ -917,7 +953,11 @@ class HadoopCluster(object):
         """Copy history logs from master.
         
         Args:
-          dest (str): the path of the local dir where the logs will be copied.
+          dest (str):
+            The path of the local dir where the logs will be copied.
+          job_ids (list of str, optional):
+            A list with the ids of the jobs for which the history should be
+            copied. If nothing is passed, the history of all jobs is copied.
         """
 
         if not os.path.exists(dest):
@@ -967,7 +1007,7 @@ class HadoopCluster(object):
         shutil.rmtree(self.conf_dir)
 
     def clean_logs(self):
-        """Remove all hadoop logs."""
+        """Remove all Hadoop logs."""
 
         logger.info("Cleaning logs")
 
@@ -984,7 +1024,7 @@ class HadoopCluster(object):
             self.start()
 
     def clean_data(self):
-        """Remove all data created by hadoop (including filesystem)."""
+        """Remove all data created by Hadoop (including filesystem)."""
 
         if self.running:
             logger.warn("The cluster needs to be stopped before cleaning.")
@@ -1019,7 +1059,7 @@ class HadoopCluster(object):
         self.initialized = False
 
     def __force_clean(self):
-        """Stop previous hadoop processes (if any) and remove all remote files
+        """Stop previous Hadoop processes (if any) and remove all remote files
         created by it."""
 
         hadoop_processes = [
@@ -1058,10 +1098,10 @@ class HadoopCluster(object):
         self.clean_data()
 
     def get_version(self):
-        """Return the hadoop version.
+        """Return the Hadoop version.
         
-        Returns:
-          str: The version used by the Hadoop cluster.
+        Returns (str):
+          The version used by the Hadoop cluster.
         """
 
         proc = SshProcess(self.hadoop_bin_dir + "/hadoop version",

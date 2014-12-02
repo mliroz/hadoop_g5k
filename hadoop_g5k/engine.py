@@ -43,6 +43,14 @@ class MacroException(ParameterException):
 
 
 class MacroManager(object):
+    """This class manages the macros specified in the configuration file.
+
+    The parameters of each section, along with their dependencies are passed to
+    the class. Then, it verifies that the dependencies are correct (they form a
+    DAG and respect the sections dependencies) and creates an ordered list of
+    the macros to be used when replacing their actual values in a given
+    combination.
+    """
 
     def __init__(self):
         """Create a new MacroManager object."""
@@ -52,10 +60,14 @@ class MacroManager(object):
         self.ds_macros = set([])
         self.xp_macros = set([])
 
-        self.define_test_macros()
+        self.__define_test_macros()
 
-    def define_test_macros(self):
-        """Define values and dependencies of test macros."""
+    def __define_test_macros(self):
+        """Define values and dependencies of test macros.
+
+        A set of macros are defined by default, including input and output
+        directories of datasets and experiments and their identifiers.
+        """
 
         self.test_macros = {
             "data_base_dir": "/tests/data",
@@ -87,8 +99,10 @@ class MacroManager(object):
         """Update test macros with dataset and/or combination ids.
         
         Args:
-          ds_id (int, optional): The dataset identifier.
-          comb_id (int, optional): The combination identifier.
+          ds_id (int, optional):
+           The dataset identifier.
+          comb_id (int, optional):
+            The combination identifier.
         """
 
         if ds_id:
@@ -117,7 +131,8 @@ class MacroManager(object):
         """Add the list of dataset parameters.
         
         Args:
-          params (dict): The list of dataset parameters.
+          params (dict):
+            The list of dataset parameters.
         """
 
         self.ds_params = self.ds_params.union(params)
@@ -126,7 +141,8 @@ class MacroManager(object):
         """Add the list of experiment parameters.
         
         Args:
-          params (dict): The list of experiment parameters.
+          params (dict):
+            The list of experiment parameters.
         """
 
         self.xp_params = self.xp_params.union(params)
@@ -136,8 +152,14 @@ class MacroManager(object):
         the value of m2 we use the value of m1.
         
         Args:
-          m1 (string): The name of the param used.
-          m2 (string): The name of the param being specified.
+          m1 (string):
+            The name of the param used.
+          m2 (string):
+            The name of the param being specified.
+
+        Raises:
+          MacroException:
+            If the order of sections (test -> ds -> xp) is not respected.
         """
 
         # Check if dependency is correct
@@ -160,7 +182,8 @@ class MacroManager(object):
         """Sort macros respecting dependencies.
         
         Raises:
-          MacroException: if there are cycles in dependencies between macros.
+          MacroException:
+            If there are cycles in dependencies between macros.
         """
 
         # Filter out unused test variables
@@ -184,9 +207,10 @@ class MacroManager(object):
         """Replace the macros given in the list within the value if present.
         
         Args:
-          list_macros (dict): The list of macros to replace and their respective
-            values.
-          value (string): The value where to do the replacement.
+          list_macros (dict):
+            The list of macros to replace and their respective values.
+          value (string):
+            The value where to do the replacement.
         """
 
         new_value = value
@@ -198,7 +222,8 @@ class MacroManager(object):
         """Replace macros in ds combination.
         
         Args:
-          comb (dict): The combination of parameters.
+          comb (dict):
+            The combination of parameters.
         """
 
         list_macros = self.test_macros
@@ -211,7 +236,8 @@ class MacroManager(object):
         """Replace macros in xp combination.
         
         Args:
-          comb (dict): The combination of parameters.
+          comb (dict):
+            The combination of parameters.
         """
 
         list_macros = self.test_macros
@@ -226,20 +252,23 @@ class MacroManager(object):
 
 
 class HadoopEngine(Engine):
-    """This class manages the whole workflow of a hadoop test suite."""
+    """This class manages the whole workflow of a Hadoop test suite."""
 
     def __init__(self):
         self.frontend = None
         super(HadoopEngine, self).__init__()
 
         # Parameter definition
-        self.options_parser.set_usage("usage: %prog <cluster> <n_nodes> <config_file>")
+        self.options_parser.set_usage(
+            "usage: %prog <cluster> <n_nodes> <config_file>")
         self.options_parser.add_argument("cluster",
                     "The cluster on which to run the experiment")
         self.options_parser.add_argument("n_nodes",
-                    "The number of nodes in which the experiment is going to be deployed")
+                    "The number of nodes in which the experiment is going to be"
+                    " deployed")
         self.options_parser.add_argument("config_file",
-                    "The path of the file containing the test params (INI file)")
+                    "The path of the file containing the test parameters (INI "
+                    "file)")
         self.options_parser.add_option("-k", dest="keep_alive",
                     help="keep reservation alive ..",
                     action="store_true")
@@ -277,7 +306,25 @@ class HadoopEngine(Engine):
         self.kadeploy_env_name = None
 
     def run(self):
-        """Inherited method, put here the code for running the engine"""
+        """Execute a test suite. The execution workflow is as follows:
+
+        1. Parse command-line arguments.
+
+        2. Define the parameters of the tests from the specified configuration
+        file. Generate all the combination to test from the given parameters.
+
+        3. Consume the combinations.
+
+          3.1. Setup the cluster if it has not been done (first time or after a
+          reservation ends.
+
+          3.2. Load the dataset into the Hadoop cluster.
+
+          3.3. Perform the experiments corresponding to the combinations linked
+          to the loaded dataset.
+
+        4. Clean all resources.
+        """
 
         # Get parameters
         self.cluster = self.args[0]
@@ -304,7 +351,7 @@ class HadoopEngine(Engine):
             # While they are combinations to treat
             while len(self.sweeper.get_remaining()) > 0:
 
-                ## SETUP
+                # SETUP
                 # If no job, we make a reservation and prepare the hosts for the
                 # experiments
                 if job_is_dead or self.oar_job_id is None:
@@ -313,12 +360,13 @@ class HadoopEngine(Engine):
                     if not success:
                         break
                 else:
-                    self.hosts = get_oar_job_nodes(self.oar_job_id, self.frontend)
+                    self.hosts = get_oar_job_nodes(self.oar_job_id,
+                                                   self.frontend)
                 if not self.hc:
                     self.hc = HadoopCluster(self.hosts)
-                ## SETUP FINISHED
+                # SETUP FINISHED
 
-                # Getting the next combination (which requires a dataset deployment)
+                # Getting the next combination (which requires a ds deployment)
                 comb = self.sweeper.get_next()
                 self.raw_comb = comb.copy()
                 self.comb = comb
@@ -327,8 +375,8 @@ class HadoopEngine(Engine):
 
                 # subloop over the combinations that use the same dataset
                 while True:
-                    newcomb = self.sweeper.get_next(lambda r:
-                            filter(self._uses_same_ds, r))
+                    newcomb = self.sweeper.get_next(
+                        lambda r: filter(self._uses_same_ds, r))
                     if newcomb:
                         self.raw_comb = newcomb.copy()
                         try:
@@ -338,7 +386,8 @@ class HadoopEngine(Engine):
                     else:
                         break
 
-                if get_oar_job_info(self.oar_job_id, self.frontend)['state'] == 'Error':
+                if get_oar_job_info(self.oar_job_id,
+                                    self.frontend)['state'] == 'Error':
                     job_is_dead = True
 
         finally:
@@ -366,20 +415,21 @@ class HadoopEngine(Engine):
         current one.
         
         Args:
-          candidate_comb (dict): The combination candidate to be selected as the
-            new combination.
+          candidate_comb (dict):
+            The combination candidate to be selected as the new combination.
         """
 
         for var in self.ds_parameters.keys():
-          if candidate_comb[var] != self.raw_comb[var]:
-            return False
+            if candidate_comb[var] != self.raw_comb[var]:
+                return False
         return True
 
     def __define_test_parameters(self, config):
         if config.has_section("test_parameters"):
             test_parameters_names = config.options("test_parameters")
             if "test.stats_path" in test_parameters_names:
-                self.stats_path = config.get("test_parameters", "test.stats_path")
+                self.stats_path = config.get("test_parameters",
+                                             "test.stats_path")
                 if not os.path.exists(self.stats_path):
                     os.makedirs(self.stats_path)
 
@@ -409,11 +459,15 @@ class HadoopEngine(Engine):
                 self.hadoop_props = \
                     config.get("test_parameters", "test.hadoop.properties")
                 if not os.path.exists(self.hadoop_props):
-                    logger.error("Hadoop properties file " + self.hadoop_props + " does not exist")
-                    raise ParameterException("Hadoop properties file " + self.hadoop_props + " does not exist")
+                    logger.error("Hadoop properties file " + self.hadoop_props +
+                                 " does not exist")
+                    raise ParameterException("Hadoop properties file " +
+                                             self.hadoop_props +
+                                             " does not exist")
 
             if "test.use_kadeploy" in test_parameters_names:
-                self.use_kadeploy = config.getboolean("test_parameters", "test.use_kadeploy")
+                self.use_kadeploy = config.getboolean("test_parameters",
+                                                      "test.use_kadeploy")
 
             if self.use_kadeploy:
                 if "test.kadeploy.env_file" in test_parameters_names:
@@ -423,15 +477,19 @@ class HadoopEngine(Engine):
                     self.kadeploy_env_name = \
                         config.get("test_parameters", "test.kadeploy.env_name")
                 else:
-                    logger.error("Either test.kadeploy.env_file or test.kadeploy.env_name should be specified")
-                    raise ParameterException("Either test.kadeploy.env_file or test.kadeploy.env_name should be specified")
+                    logger.error("Either test.kadeploy.env_file or "
+                                 "test.kadeploy.env_name should be specified")
+                    raise ParameterException("Either test.kadeploy.env_file or "
+                                             "test.kadeploy.env_name should be "
+                                             "specified")
             else:
                 if "test.hadoop.tar_file" in test_parameters_names:
                     self.hadoop_tar_file = \
                         config.get("test_parameters", "test.hadoop.tar_file")
                 else:
                     logger.error("test.hadoop.tar_file should be specified")
-                    raise ParameterException("test.hadoop.tar_file should be specified")
+                    raise ParameterException("test.hadoop.tar_file should be "
+                                             "specified")
 
     def __define_ds_parameters(self, config):
         ds_parameters_names = config.options("ds_parameters")
@@ -463,7 +521,8 @@ class HadoopEngine(Engine):
                     this_ds_params[pn] = pv[0]
                 else:
                     logger.error("Number of ds_class does not much number of " + pn)
-                    raise ParameterException("Number of ds_class does not much number of " + pn)
+                    raise ParameterException("Number of ds_class does not much "
+                                             "number of " + pn)
 
             self.ds_config.append((ds_class, this_ds_params))
 
@@ -632,10 +691,10 @@ class HadoopEngine(Engine):
         that the specified min, try again.
         
         Args:
-          min_deployed_hosts (int, optional): minimum number of nodes to be
-            deployed (default: 1).
-          max_tries (int, optional): maximum number of tries to reach the
-            minimum number of nodes (default: 3).
+          min_deployed_hosts (int, optional):
+            Minimum number of nodes to be deployed.
+          max_tries (int, optional):
+            Maximum number of tries to reach the minimum number of nodes.
         """
 
         logger.info("Deploying " + str(len(self.hosts)) + " nodes")
@@ -670,7 +729,8 @@ class HadoopEngine(Engine):
         """Prepare the dataset to be used in the next set of experiments.
         
         Args:
-          comb (dict): The combination containing the dataset's parameters.        
+          comb (dict):
+            The combination containing the dataset's parameters.
         """
 
         logger.info("Prepare dataset with combination " +
@@ -692,7 +752,8 @@ class HadoopEngine(Engine):
         """Load the dataset corresponding to the given combination.
         
         Args:
-          comb (dict): The combination containing the dataset's parameters.
+          comb (dict):
+            The combination containing the dataset's parameters.
         """
 
         # Create dataset object
@@ -706,7 +767,7 @@ class HadoopEngine(Engine):
         self._update_ds_summary(comb)
 
     def _update_ds_summary(self, comb):
-        """Update ds summary with the loaded ds"""
+        """Update ds summary with the loaded ds."""
 
         ds_idx = comb["ds.config"]
         (ds_class_name, ds_params) = self.ds_config[ds_idx]
@@ -719,7 +780,8 @@ class HadoopEngine(Engine):
         """Perform macro replacement and manage experiment's repetitions.
         
         Args:
-          comb (dict): The combination with the experiment's parameters.
+          comb (dict):
+            The combination with the experiment's parameters.
         """
 
         comb_ok = False
@@ -754,7 +816,8 @@ class HadoopEngine(Engine):
         """Perform the experiment corresponding to the given combination.
 
         Args:
-          comb (dict): The combination with the experiment's parameters.
+          comb (dict):
+            The combination with the experiment's parameters.
         """
 
         # Prepare
@@ -770,12 +833,12 @@ class HadoopEngine(Engine):
         self._remove_xp_output()
         self._copy_xp_stats()
 
-
     def _change_hadoop_conf(self, comb):
         """Change hadoop's configuration by using the experiment's parameters.
         
         Args:
-          comb (dict): The combination with the experiment's parameters.
+          comb (dict):
+            The combination with the experiment's parameters.
         """
 
         self.hc.stop()  # Some parameters only take effect after restart
@@ -794,7 +857,8 @@ class HadoopEngine(Engine):
         """Create the hadoop job.
         
         Args:
-          comb (dict): The combination with the experiment's parameters.
+          comb (dict):
+            The combination with the experiment's parameters.
         """
 
         xp_job_parts = comb["xp.job"].split("||")  # TODO
@@ -812,7 +876,7 @@ class HadoopEngine(Engine):
         return HadoopJarJob(jar_path, params, lib_jars)
 
     def _update_summary(self, comb, job):
-        """Update test summary with the executed job"""
+        """Update test summary with the executed job."""
 
         line = str(self.comb_id) + ", " + job.job_id
         for pn in self.summary_props:
@@ -821,7 +885,7 @@ class HadoopEngine(Engine):
         self.summary_file.flush()
 
     def _copy_xp_output(self):
-        """Copy experiment's output"""
+        """Copy experiment's output."""
 
         if self.output_path:
             remote_path = self.macro_manager.test_macros["xp.output"]  # TODO: what happens if not specified?
@@ -837,7 +901,8 @@ class HadoopEngine(Engine):
             proc.run()
 
             # Get files in master
-            self.hc.execute("fs -get " + remote_path + " " + tmp_dir, verbose=False)
+            self.hc.execute("fs -get " + remote_path + " " + tmp_dir,
+                            verbose=False)
 
             # Copy files from master
             action = Get([self.hc.master],

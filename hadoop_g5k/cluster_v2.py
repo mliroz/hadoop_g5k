@@ -27,7 +27,7 @@ DEFAULT_HADOOP_LOCAL_CONF_DIR = "conf"
 
 
 class HadoopV2Cluster(HadoopCluster):
-    """This class manages the whole life-cycle of a hadoop cluster with version
+    """This class manages the whole life-cycle of a Hadoop cluster with version
     2 or higher.
 
     It adds some functionality over HadoopCluster: the YARN server can be
@@ -54,11 +54,13 @@ class HadoopV2Cluster(HadoopCluster):
         """Create a new Hadoop cluster with the given hosts and topology.
         
         Args:
-          hosts (list of Host): The hosts to be assigned a topology.
-          topo_list (list of str, optional): The racks to be assigned to each
-            host. len(hosts) should be equal to len(topo_list)
-            Second line of description should be indented.
-          config_file (str, optional): The path of the config file to be used.
+          hosts (list of Host):
+            The hosts to be assigned a topology.
+          topo_list (list of str, optional):
+            The racks to be assigned to each host. len(hosts) should be equal to
+            len(topo_list).
+          config_file (str, optional):
+            The path of the config file to be used.
         """
         
         super(HadoopV2Cluster, self).__init__(hosts, topo_list, config_file)
@@ -101,10 +103,10 @@ class HadoopV2Cluster(HadoopCluster):
         """Configure servers and host-dependant parameters.
 
            Args:
-             hosts (list of Host, optional): The list of hosts to take into
-               account in the configuration. If not specified, all the hosts of
-               the hadoop cluster are used. The first host of this list is
-               always used as the reference.
+             hosts (list of Host, optional):
+               The list of hosts to take into account in the configuration. If
+               not specified, all the hosts of the Hadoop cluster are used. The
+               first host of this list is always used as the reference.
         """
 
         if not hosts:
@@ -162,6 +164,13 @@ class HadoopV2Cluster(HadoopCluster):
                               "mapreduce_shuffle", True)
 
     def bootstrap(self, hadoop_tar_file):
+        """Install Hadoop in all cluster nodes from the specified tar.gz file.
+
+        Args:
+          hadoop_tar_file (str):
+            The file containing Hadoop binaries.
+        """
+
         super(HadoopV2Cluster, self).bootstrap(hadoop_tar_file)
 
         action = Remote("cp " + os.path.join(self.hadoop_conf_dir,
@@ -171,7 +180,7 @@ class HadoopV2Cluster(HadoopCluster):
         action.run()
 
     def start(self):
-        """Start the dfs and then yarn."""
+        """Start the dfs and then YARN."""
 
         self._check_initialization()
 
@@ -255,7 +264,11 @@ class HadoopV2Cluster(HadoopCluster):
         """Copy history logs from dfs.
 
         Args:
-          dest (str): the path of the local dir where the logs will be copied.
+          dest (str):
+            The path of the local dir where the logs will be copied.
+          job_ids (list of str, optional):
+            A list with the ids of the jobs for which the history should be
+            copied. If nothing is passed, the history of all jobs is copied.
         """
 
         if not os.path.exists(dest):
