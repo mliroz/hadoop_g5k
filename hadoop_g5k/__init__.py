@@ -2,7 +2,8 @@
 cluster.
 """
 
-from cluster import HadoopCluster, HadoopJarJob, HadoopTopology
+from cluster import HadoopCluster
 from cluster_v2 import HadoopV2Cluster
-from engine import HadoopEngine
-from dataset import Dataset, StaticDataset, DynamicDataset
+from objects import HadoopJarJob, HadoopTopology
+from engine.engine import HadoopEngine
+from engine.dataset import Dataset, StaticDataset, DynamicDataset

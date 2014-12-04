@@ -23,6 +23,7 @@ from execo_g5k.planning import get_jobs_specs, get_planning, compute_slots
 from networkx import DiGraph, NetworkXUnfeasible, topological_sort
 
 from hadoop_g5k.cluster import HadoopCluster, HadoopJarJob
+from hadoop_g5k.objects import HadoopJarJob
 from hadoop_g5k.util import import_class
 
 

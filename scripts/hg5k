@@ -16,8 +16,9 @@ from execo.process import SshProcess
 from execo_engine import logger
 from execo_g5k import get_oar_job_nodes, get_oargrid_job_nodes
 
-from hadoop_g5k.cluster import HadoopCluster, HadoopJarJob
+from hadoop_g5k.cluster import HadoopCluster
 from hadoop_g5k.cluster_v2 import HadoopV2Cluster
+from hadoop_g5k.objects import HadoopJarJob
 
 __user_login = getpass.getuser()
 

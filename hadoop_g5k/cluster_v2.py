@@ -171,16 +171,25 @@ class HadoopV2Cluster(HadoopCluster):
             The file containing Hadoop binaries.
         """
 
-        super(HadoopV2Cluster, self).bootstrap(hadoop_tar_file)
+        if super(HadoopV2Cluster, self).bootstrap(hadoop_tar_file):
+            action = Remote("cp " + os.path.join(self.hadoop_conf_dir,
+                                                 MR_CONF_FILE + ".template ") +
+                            os.path.join(self.hadoop_conf_dir, MR_CONF_FILE),
+                            self.hosts)
+            action.run()
 
-        action = Remote("cp " + os.path.join(self.hadoop_conf_dir,
-                                             MR_CONF_FILE + ".template ") +
-                        os.path.join(self.hadoop_conf_dir, MR_CONF_FILE),
-                        self.hosts)
-        action.run()
+    def _check_version_compliance(self):
+        version = self.get_version()
+        if not version.startswith("Hadoop 2."):
+            logger.error("Version of HadoopCluster is not compliant with the "
+                        "distribution provided in the bootstrap option")
+            return False
+        else:
+            return True
 
     def start(self):
-        """Start the dfs and then YARN."""
+        """Start the NameNode and DataNodes and then the YARN ResourceManager
+        and NodeManagers."""
 
         self._check_initialization()
 
@@ -190,8 +199,8 @@ class HadoopV2Cluster(HadoopCluster):
         self.running = True
 
     def start_and_wait(self):
-        """Start the namenode and the YARN servers. Wait for them to exit
-        safemode before continuing."""
+        """Start the Namenode and DataNodes and then the YARN ResourceManager
+        and NodeManagers. Wait for exiting safemode before continuing."""
 
         self._check_initialization()
 
@@ -201,7 +210,7 @@ class HadoopV2Cluster(HadoopCluster):
         self.running = True
 
     def start_yarn(self):
-        """Start the YARN server."""
+        """Start the YARN ResourceManager and NodeManagers."""
 
         logger.info("Starting YARN")
         
@@ -229,7 +238,8 @@ class HadoopV2Cluster(HadoopCluster):
                     "version of Hadoop.")
         
     def stop(self):
-        """Stop the jobtracker and then the namenode."""
+        """Stop the JobTracker and TaskTracekrs and then the NameNode and
+        DataNodes."""
 
         self._check_initialization()
 
@@ -239,7 +249,7 @@ class HadoopV2Cluster(HadoopCluster):
         self.running = False        
         
     def stop_yarn(self):
-        """Stop the YARN server."""
+        """Stop the YARN ResourceManager and NodeManagers."""
         
         self._check_initialization()
 

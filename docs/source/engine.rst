@@ -5,11 +5,11 @@
 .. autoclass:: hadoop_g5k.engine.HadoopEngine
     :members:
 
-.. autoclass:: hadoop_g5k.dataset.Dataset
+.. autoclass:: hadoop_g5k.engine.dataset.Dataset
     :members:
 
-.. autoclass:: hadoop_g5k.dataset.StaticDataset
+.. autoclass:: hadoop_g5k.engine.dataset.StaticDataset
     :members:
 
-.. autoclass:: hadoop_g5k.dataset.DynamicDataset
+.. autoclass:: hadoop_g5k.engine.dataset.DynamicDataset
     :members:
