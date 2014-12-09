@@ -19,122 +19,14 @@ from execo_g5k import get_oar_job_nodes, get_oargrid_job_nodes
 from hadoop_g5k.cluster import HadoopCluster
 from hadoop_g5k.cluster_v2 import HadoopV2Cluster
 from hadoop_g5k.objects import HadoopJarJob
-
-__user_login = getpass.getuser()
-
-hg5k_tmp_dir = "/tmp/" + __user_login + "_hg5k/clusters"
-
-
-def deserialize_hcluster(hc_file_name):
-    """Return a Hadoop Cluster object from the given file.
-
-    Args:
-      hc_file_name (str): The path where Hadoop Cluster has been serialized.
-
-
-    Returns:
-      HadoopCluster: The deserialized cluster object.
-    """
-
-    logger.info("Deserialize hc from " + hc_file_name)
-
-    hc_file = open(hc_file_name, 'rb')
-    hc = pickle.load(hc_file)
-
-    return hc
-
-
-def serialize_hcluster(hc_file_name, hc):
-    """Serialize the Hadoop Cluster object into the indicated file.
-
-    Args:
-      hc_file_name (str): The path where Hadoop Cluster will be serialized.
-      hc (HadoopCluster): The hadoop cluster object.
-    """
-
-    logger.info("Serialize hc in " + hc_file_name)
-
-    hc_file = open(hc_file_name, 'wb')
-    pickle.dump(hc, hc_file)
+from hadoop_g5k.util import generate_hosts, generate_new_id, ClusterType, \
+    get_default_id, cluster_exists, deserialize_cluster, remove_cluster, \
+    serialize_cluster
 
 
 if __name__ == "__main__":
 
-    if not os.path.exists(hg5k_tmp_dir):
-        os.makedirs(hg5k_tmp_dir)
-
-    def __get_default_id():
-        """Return the last used id.
-
-        Returns:
-          int: The id of the most recently modified cluster.
-        """
-        files = os.listdir(hg5k_tmp_dir)
-
-        most_recent_file = None
-        most_recent_access = 0
-
-        for f in files:
-            fstat = os.stat(os.path.join(hg5k_tmp_dir, f))
-            if fstat.st_atime > most_recent_access:
-                most_recent_file = int(f)
-                most_recent_access = fstat.st_atime
-
-        return most_recent_file
-
-    def __generate_new_id():
-        """Return the highest generated id + 1.
-
-        Returns:
-          int: The new generated id.
-        """
-
-        files = os.listdir(hg5k_tmp_dir)
-
-        if len(files) == 0:
-            return 1
-        else:
-            highest_id = 0
-
-            for f in files:
-                highest_id = max(highest_id, int(f))
-
-            return highest_id + 1
-
-    def __generate_hosts(hosts_input):
-        """Generate a list of hosts from the given file.
-
-        Args:
-          hosts_input: The path of the file containing the hosts to be used,
-            or a comma separated list of site:job_id or an oargrid_job_id.
-            If a file is used, each host should be in a different line.
-            Repeated hosts are pruned.
-            Hint: in a running Grid5000 job,  $OAR_NODEFILE should be used.
-
-        Return:
-          list of Host: The list of hosts.
-        """
-        hosts = []
-        if os.path.isfile(hosts_input):
-            for line in open(hosts_input):
-                h = Host(line.rstrip())
-                if h not in hosts:
-                    hosts.append(h)
-        elif ':' in hosts_input:
-            # We assume the string is a comma separated list of site:job_id
-            for job in hosts_input.split(','):
-                site, job_id = job.split(':')
-                hosts += get_oar_job_nodes(int(job_id), site)
-        else:
-            # If the file_name is a number, we assume this is a oargrid_job_id
-            hosts = get_oargrid_job_nodes(int(hosts_input))
-        logger.debug('Hosts list: \n%s',
-                     ' '.join(style.host(host.address.split('.')[0])
-                              for host in hosts))
-        return hosts
-
-    # Main ####################################################################
-    prog = "hadoop_g5k"
+    prog = "hg5k"
     description = "This tool helps you to manage a Hadoop cluster in Grid5000."
     parser = ArgumentParser(prog=prog,
                             description=description,
@@ -143,7 +35,7 @@ if __name__ == "__main__":
 
     actions = parser.add_argument_group(style.host("General options"),
                                         "Options to be used generally "
-                                        "with hadoop action.s")
+                                        "with Hadoop actions.")
 
     actions.add_argument("-h", "--help",
                          action="help",
@@ -218,13 +110,13 @@ if __name__ == "__main__":
                               metavar="HADOOP_TAR",
                               nargs=1,
                               action="store",
-                              help="Install hadoop in the cluster nodes taking"
+                              help="Install Hadoop in the cluster nodes taking"
                                    " into account the specified properties.\n"
                                    "HADOOP_TAR defines the path of the .tar.gz"
-                                   " file containing hadoop binaries.")
+                                   " file containing Hadoop binaries.")
 
     actions = parser.add_argument_group(style.host("Hadoop actions"),
-                                        "Actions to execute in the hadoop "
+                                        "Actions to execute in the Hadoop "
                                         "cluster. Several options can be "
                                         "indicated at the same time.\n"
                                         "The order of execution is fixed no "
@@ -247,7 +139,7 @@ if __name__ == "__main__":
     actions.add_argument("--start",
                          dest="start",
                          action="store_true",
-                         help="Start the namenode and jobtracker")
+                         help="Start the NameNode and JobTracker")
 
     actions.add_argument("--putindfs",
                          action="store",
@@ -267,7 +159,7 @@ if __name__ == "__main__":
                          action="store",
                          nargs=1,
                          metavar="COMMAND",
-                         help="Execute a hadoop command")
+                         help="Execute a Hadoop command")
 
     actions.add_argument("--jarjob",
                          action="store",
@@ -287,16 +179,16 @@ if __name__ == "__main__":
     actions.add_argument("--stop",
                          dest="stop",
                          action="store_true",
-                         help="Stop the namenode and jobtracker")
+                         help="Stop the NameNode and JobTracker")
 
     actions.add_argument("--clean",
                          dest="clean",
                          action="store_true",
-                         help="Remove hadoop logs and clean the dfs")
+                         help="Remove Hadoop logs and clean the dfs")
 
     queries = parser.add_argument_group(style.host("Hadoop queries"),
                                         "Set of queries that can be executed "
-                                        "in hadoop.")
+                                        "in Hadoop.")
 
     queries.add_argument("--state",
                          action="store",
@@ -319,15 +211,15 @@ if __name__ == "__main__":
         hc_id = int(args.id[0])
     else:
         if args.create:
-            hc_id = __generate_new_id()
+            hc_id = generate_new_id(ClusterType.HADOOP)
         else:
-            hc_id = __get_default_id()
+            hc_id = get_default_id(ClusterType.HADOOP)
             if not hc_id:
                 logger.error("There is no available cluster. You must create a"
                              " new one")
                 sys.exit(3)
 
-    logger.info("Using id = " + str(hc_id))
+    logger.info("Using id = " + str(hc_id) + " (HADOOP)")
 
     verbose = True
     if args.quiet:
@@ -342,15 +234,14 @@ if __name__ == "__main__":
             node_host = Host(args.node[0])
 
     # Create or load object
-    hc_file_name = os.path.join(hg5k_tmp_dir, str(hc_id))
     if args.create:
 
-        if os.path.exists(hc_file_name):
+        if cluster_exists(ClusterType.HADOOP, hc_id):
             logger.error("There is a hadoop cluster with that id. You must "
                          "remove it before or chose another id")
             sys.exit(1)
 
-        hosts = __generate_hosts(args.create[0])
+        hosts = generate_hosts(args.create[0])
 
         if args.version:
             if args.version[0].startswith("0."):
@@ -373,25 +264,24 @@ if __name__ == "__main__":
     elif args.delete:
 
         # Clean
-        hc = deserialize_hcluster(hc_file_name)
+        hc = deserialize_cluster(ClusterType.HADOOP, hc_id)
         if hc.initialized:
             logger.warn("The cluster needs to be cleaned before removed.")
             hc.clean()
 
         # Remove hc dump file
-        logger.info("Removing hc dump file " + hc_file_name)
-        os.remove(hc_file_name)
+        logger.info("Removing hc dump file from cluster")
+        remove_cluster(ClusterType.HADOOP, hc_id, hc)
 
         sys.exit(0)
     else:
         # Deserialize
-        hc = deserialize_hcluster(hc_file_name)
+        hc = deserialize_cluster(ClusterType.HADOOP, hc_id)
 
     # Execute options
     if args.bootstrap:
         hc.bootstrap(args.bootstrap[0])
 
-    # Execute options
     if args.initialize:
         hc.initialize()
 
@@ -583,4 +473,4 @@ if __name__ == "__main__":
             print stdout
             print ""
 
-    serialize_hcluster(hc_file_name, hc)    
+    serialize_cluster(ClusterType.HADOOP, hc_id, hc)

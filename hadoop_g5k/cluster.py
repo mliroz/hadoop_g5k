@@ -4,6 +4,7 @@ import re
 import shutil
 import sys
 import tempfile
+
 try:  # Import Python 3 package, turn back to Python 2 if fails
     import configparser
 except ImportError:
@@ -15,6 +16,7 @@ from execo_engine import logger
 from execo_g5k.api_utils import get_host_attributes, get_host_cluster
 
 from hadoop_g5k.objects import HadoopJarJob, HadoopTopology
+from hadoop_g5k.util import ColorDecorator
 
 # Constant definitions
 CORE_CONF_FILE = "core-site.xml"
@@ -633,21 +635,6 @@ class HadoopCluster(object):
         else:
             self.running_map_reduce = False
 
-    class __ColorDecorator(object):
-
-        defaultColor = '\033[0;0m'
-
-        def __init__(self, component, color):
-            self.component = component
-            self.color = color
-
-        def __getattr__(self, attr):
-            if attr == 'write' and self.component.isatty():
-                return lambda x: self.component.write(self.color + x +
-                                                      self.defaultColor)
-            else:
-                return getattr(self.component, attr)
-
     def execute(self, command, node=None, should_be_running=True,
                 verbose=True):
         """Execute the given Hadoop command in the given node.
@@ -689,7 +676,7 @@ class HadoopCluster(object):
 
             proc.stdout_handlers.append(sys.stdout)
             proc.stderr_handlers.append(
-                self.__ColorDecorator(sys.stderr, red_color))
+                ColorDecorator(sys.stderr, red_color))
 
         proc.start()
         proc.wait()
@@ -743,7 +730,7 @@ class HadoopCluster(object):
 
             proc.stdout_handlers.append(sys.stdout)
             proc.stderr_handlers.append(
-                self.__ColorDecorator(sys.stderr, red_color))
+                ColorDecorator(sys.stderr, red_color))
 
         proc.start()
         proc.wait()
@@ -927,3 +914,4 @@ class HadoopCluster(object):
         proc.run()
         version = proc.stdout.splitlines()[0]
         return version
+
