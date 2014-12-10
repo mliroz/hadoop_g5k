@@ -10,6 +10,8 @@ import shutil
 from hadoop_g5k.cluster import HadoopCluster
 
 # Constant definitions
+from hadoop_g5k.util import replace_in_xml_file
+
 CORE_CONF_FILE = "core-site.xml"
 HDFS_CONF_FILE = "hdfs-site.xml"
 MR_CONF_FILE = "mapred-site.xml"
@@ -118,50 +120,50 @@ class HadoopV2Cluster(HadoopCluster):
                            (1024 * 1024)) - 2 * 1024
         mem_per_task_mb = total_memory_mb / (num_cores - 1)
 
-        self._replace_in_file(os.path.join(self.conf_dir, CORE_CONF_FILE),
-                              "fs.defaultFS",
-                              "hdfs://" + self.master.address + ":" +
-                                          str(self.hdfs_port) + "/",
-                              True)
-        self._replace_in_file(os.path.join(self.conf_dir, CORE_CONF_FILE),
-                              "hadoop.tmp.dir",
-                              self.hadoop_temp_dir, True)
-        self._replace_in_file(os.path.join(self.conf_dir, CORE_CONF_FILE),
-                              "topology.script.file.name",
-                              self.hadoop_conf_dir + "/topo.sh", True)
+        replace_in_xml_file(os.path.join(self.conf_dir, CORE_CONF_FILE),
+                            "fs.defaultFS",
+                            "hdfs://" + self.master.address + ":" +
+                                        str(self.hdfs_port) + "/",
+                            True)
+        replace_in_xml_file(os.path.join(self.conf_dir, CORE_CONF_FILE),
+                            "hadoop.tmp.dir",
+                            self.hadoop_temp_dir, True)
+        replace_in_xml_file(os.path.join(self.conf_dir, CORE_CONF_FILE),
+                            "topology.script.file.name",
+                            self.hadoop_conf_dir + "/topo.sh", True)
 
-        self._replace_in_file(os.path.join(self.conf_dir, MR_CONF_FILE),
-                              "mapreduce.framework.name", "yarn", True)
-        self._replace_in_file(os.path.join(self.conf_dir, MR_CONF_FILE),
-                              "mapreduce.map.memory.mb",
-                              str(mem_per_task_mb), True)
-        self._replace_in_file(os.path.join(self.conf_dir, MR_CONF_FILE),
-                              "mapreduce.map.java.opts",
-                              "-Xmx" + str(mem_per_task_mb) + "m", True)
-        self._replace_in_file(os.path.join(self.conf_dir, MR_CONF_FILE),
-                              "mapreduce.map.cpu.vcores", "1", True)
-        self._replace_in_file(os.path.join(self.conf_dir, MR_CONF_FILE),
-                              "mapreduce.reduce.memory.mb",
-                              str(mem_per_task_mb), True)
-        self._replace_in_file(os.path.join(self.conf_dir, MR_CONF_FILE),
-                              "mapreduce.reduce.cpu.vcores", "1", True)
-        self._replace_in_file(os.path.join(self.conf_dir, MR_CONF_FILE),
-                              "mapreduce.reduce.java.opts",
-                              "-Xmx" + str(mem_per_task_mb) + "m", True)
+        replace_in_xml_file(os.path.join(self.conf_dir, MR_CONF_FILE),
+                            "mapreduce.framework.name", "yarn", True)
+        replace_in_xml_file(os.path.join(self.conf_dir, MR_CONF_FILE),
+                            "mapreduce.map.memory.mb",
+                            str(mem_per_task_mb), True)
+        replace_in_xml_file(os.path.join(self.conf_dir, MR_CONF_FILE),
+                            "mapreduce.map.java.opts",
+                            "-Xmx" + str(mem_per_task_mb) + "m", True)
+        replace_in_xml_file(os.path.join(self.conf_dir, MR_CONF_FILE),
+                            "mapreduce.map.cpu.vcores", "1", True)
+        replace_in_xml_file(os.path.join(self.conf_dir, MR_CONF_FILE),
+                            "mapreduce.reduce.memory.mb",
+                            str(mem_per_task_mb), True)
+        replace_in_xml_file(os.path.join(self.conf_dir, MR_CONF_FILE),
+                            "mapreduce.reduce.cpu.vcores", "1", True)
+        replace_in_xml_file(os.path.join(self.conf_dir, MR_CONF_FILE),
+                            "mapreduce.reduce.java.opts",
+                            "-Xmx" + str(mem_per_task_mb) + "m", True)
 
-        self._replace_in_file(os.path.join(self.conf_dir, YARN_CONF_FILE),
-                              "yarn.resourcemanager.address",
-                              self.master.address + ":" +
-                              str(self.mapred_port), True)
-        self._replace_in_file(os.path.join(self.conf_dir, YARN_CONF_FILE),
-                              "yarn.nodemanager.resource.memory-mb",
-                              str(total_memory_mb), True)
-        self._replace_in_file(os.path.join(self.conf_dir, YARN_CONF_FILE),
-                              "yarn.nodemanager.resource.cpu-vcores",
-                              str(num_cores - 1), True)
-        self._replace_in_file(os.path.join(self.conf_dir, YARN_CONF_FILE),
-                              "yarn.nodemanager.aux-services",
-                              "mapreduce_shuffle", True)
+        replace_in_xml_file(os.path.join(self.conf_dir, YARN_CONF_FILE),
+                            "yarn.resourcemanager.address",
+                            self.master.address + ":" +
+                            str(self.mapred_port), True)
+        replace_in_xml_file(os.path.join(self.conf_dir, YARN_CONF_FILE),
+                            "yarn.nodemanager.resource.memory-mb",
+                            str(total_memory_mb), True)
+        replace_in_xml_file(os.path.join(self.conf_dir, YARN_CONF_FILE),
+                            "yarn.nodemanager.resource.cpu-vcores",
+                            str(num_cores - 1), True)
+        replace_in_xml_file(os.path.join(self.conf_dir, YARN_CONF_FILE),
+                            "yarn.nodemanager.aux-services",
+                            "mapreduce_shuffle", True)
 
     def bootstrap(self, hadoop_tar_file):
         """Install Hadoop in all cluster nodes from the specified tar.gz file.

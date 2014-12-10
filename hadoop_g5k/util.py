@@ -1,12 +1,15 @@
 import getpass
 import os
 import pickle
+import tempfile
 
 from execo.action import Remote
 from execo.host import Host
 from execo.log import style
 from execo_engine import logger
 from execo_g5k import get_oar_job_nodes, get_oargrid_job_nodes
+import shutil
+import re
 
 
 def import_class(name):
@@ -281,10 +284,7 @@ def remove_cluster(cluster_type, cid, cluster_object):
 
     if cluster_type != ClusterType.HADOOP:
         hc_link_fname = __get_hc_link_file(cluster_type, cid)
-        if os.path.exists(hc_link_fname):
-            with open(hc_link_fname) as link_file:
-                hc_id = int(link_file.readline())
-            serialize_cluster(ClusterType.HADOOP, hc_id, cluster_object.hc)
+        os.remove(hc_link_fname)
 
 
 def link_to_hadoop_cluster(cluster_type, cid, hc_id):
@@ -318,3 +318,67 @@ class ColorDecorator(object):
                                                   self.defaultColor)
         else:
             return getattr(self.component, attr)
+
+
+def replace_in_xml_file(f, name, value, create_if_absent=False):
+    """Assign the given value to variable name in xml file f.
+
+    Args:
+      f (str):
+        The path of the file.
+      name (str):
+        The name of the variable.
+      value (str):
+        The new value to be assigned:
+      create_if_absent (bool, optional):
+        If True, the variable will be created at the end of the file in case
+        it was not already present.
+
+    Returns (bool):
+      True if the assignment has been made, False otherwise.
+    """
+
+    changed = False
+
+    (_, temp_file) = tempfile.mkstemp("", "xmlf-", "/tmp")
+
+    inf = open(f)
+    outf = open(temp_file, "w")
+    line = inf.readline()
+    while line != "":
+        if "<name>" + name + "</name>" in line:
+            if "<value>" in line:
+                outf.write(__replace_line(line, value))
+                changed = True
+            else:
+                outf.write(line)
+                line = inf.readline()
+                if line != "":
+                    outf.write(__replace_line(line, value))
+                    changed = True
+                else:
+                    logger.error("Configuration file " + f +
+                                 " is not correctly formatted")
+        else:
+            if ("</configuration>" in line and
+                    create_if_absent and not changed):
+                outf.write("  <property><name>" + name + "</name>" +
+                           "<value>" + str(value) + "</value></property>\n")
+                outf.write(line)
+                changed = True
+            else:
+                outf.write(line)
+        line = inf.readline()
+    inf.close()
+    outf.close()
+
+    if changed:
+        shutil.copyfile(temp_file, f)
+    os.remove(temp_file)
+
+    return changed
+
+
+def __replace_line(line, value):
+    return re.sub(r'(.*)<value>[^<]*</value>(.*)', r'\g<1><value>' + value +
+                  r'</value>\g<2>', line)

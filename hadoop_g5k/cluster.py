@@ -16,7 +16,7 @@ from execo_engine import logger
 from execo_g5k.api_utils import get_host_attributes, get_host_cluster
 
 from hadoop_g5k.objects import HadoopJarJob, HadoopTopology
-from hadoop_g5k.util import ColorDecorator
+from hadoop_g5k.util import ColorDecorator, replace_in_xml_file
 
 # Constant definitions
 CORE_CONF_FILE = "core-site.xml"
@@ -323,31 +323,31 @@ class HadoopCluster(object):
                            (1024 * 1024)) - 2 * 1024
         mem_per_slot_mb = total_memory_mb / (num_cores - 1)
 
-        self._replace_in_file(os.path.join(self.conf_dir, CORE_CONF_FILE),
-                              "fs.default.name",
-                              "hdfs://" + self.master.address + ":" +
-                                          str(self.hdfs_port) + "/",
-                              True)
-        self._replace_in_file(os.path.join(self.conf_dir, CORE_CONF_FILE),
-                              "hadoop.tmp.dir",
-                              self.hadoop_temp_dir, True)
-        self._replace_in_file(os.path.join(self.conf_dir, CORE_CONF_FILE),
-                              "topology.script.file.name",
-                              self.hadoop_conf_dir + "/topo.sh", True)
+        replace_in_xml_file(os.path.join(self.conf_dir, CORE_CONF_FILE),
+                            "fs.default.name",
+                            "hdfs://" + self.master.address + ":" +
+                                        str(self.hdfs_port) + "/",
+                            True)
+        replace_in_xml_file(os.path.join(self.conf_dir, CORE_CONF_FILE),
+                            "hadoop.tmp.dir",
+                            self.hadoop_temp_dir, True)
+        replace_in_xml_file(os.path.join(self.conf_dir, CORE_CONF_FILE),
+                            "topology.script.file.name",
+                            self.hadoop_conf_dir + "/topo.sh", True)
 
-        self._replace_in_file(os.path.join(self.conf_dir, MR_CONF_FILE),
-                              "mapred.job.tracker",
-                              self.master.address + ":" +
-                              str(self.mapred_port), True)
-        self._replace_in_file(os.path.join(self.conf_dir, MR_CONF_FILE),
-                              "mapred.tasktracker.map.tasks.maximum",
-                              str(num_cores - 1), True)
-        self._replace_in_file(os.path.join(self.conf_dir, MR_CONF_FILE),
-                              "mapred.tasktracker.reduce.tasks.maximum",
-                              str(num_cores - 1), True)
-        self._replace_in_file(os.path.join(self.conf_dir, MR_CONF_FILE),
-                              "mapred.child.java.opts",
-                              "-Xmx" + str(mem_per_slot_mb) + "m", True)
+        replace_in_xml_file(os.path.join(self.conf_dir, MR_CONF_FILE),
+                            "mapred.job.tracker",
+                            self.master.address + ":" +
+                            str(self.mapred_port), True)
+        replace_in_xml_file(os.path.join(self.conf_dir, MR_CONF_FILE),
+                            "mapred.tasktracker.map.tasks.maximum",
+                            str(num_cores - 1), True)
+        replace_in_xml_file(os.path.join(self.conf_dir, MR_CONF_FILE),
+                            "mapred.tasktracker.reduce.tasks.maximum",
+                            str(num_cores - 1), True)
+        replace_in_xml_file(os.path.join(self.conf_dir, MR_CONF_FILE),
+                            "mapred.child.java.opts",
+                            "-Xmx" + str(mem_per_slot_mb) + "m", True)
 
     def _copy_conf(self, conf_dir, hosts=None):
         """Copy configuration files from given dir to remote dir in cluster
@@ -410,77 +410,15 @@ class HadoopCluster(object):
 
             for name, value in params.iteritems():
                 for f in temp_conf_files:
-                    if self._replace_in_file(f, name, value):
+                    if replace_in_xml_file(f, name, value):
                         break
                 else:
                     # Property not found - provisionally add it in MR_CONF_FILE
                     f = os.path.join(tmp_dir, MR_CONF_FILE)
-                    self._replace_in_file(f, name, value, True)
+                    replace_in_xml_file(f, name, value, True)
 
             # Copy back the files to all hosts
             self._copy_conf(tmp_dir, hosts)
-
-    def _replace_in_file(self, f, name, value, create_if_absent=False):
-        """Assign the given value to variable name in file f.
-        
-        Args:
-          f (str):
-            The path of the configuration file.
-          name (str):
-            The name of the variable.
-          value (str):
-            The new value to be assigned:
-          create_if_absent (bool, optional):
-            If True, the variable will be created at the end of the file in case
-            it was not already present.
-        
-        Returns (bool):
-          True if the assignment has been made, False otherwise.
-        """
-
-        changed = False
-
-        (_, temp_file) = tempfile.mkstemp("", "hadoopf-", "/tmp")
-
-        inf = open(f)
-        outf = open(temp_file, "w")
-        line = inf.readline()
-        while line != "":
-            if "<name>" + name + "</name>" in line:
-                if "<value>" in line:
-                    outf.write(self.__replace_line(line, value))
-                    changed = True
-                else:
-                    outf.write(line)
-                    line = inf.readline()
-                    if line != "":
-                        outf.write(self.__replace_line(line, value))
-                        changed = True
-                    else:
-                        logger.error("Configuration file " + f +
-                                     " is not correctly formatted")
-            else:
-                if ("</configuration>" in line and
-                        create_if_absent and not changed):
-                    outf.write("  <property><name>" + name + "</name>" +
-                               "<value>" + str(value) + "</value></property>\n")
-                    outf.write(line)
-                    changed = True
-                else:
-                    outf.write(line)
-            line = inf.readline()
-        inf.close()
-        outf.close()
-
-        if changed:
-            shutil.copyfile(temp_file, f)
-        os.remove(temp_file)
-
-        return changed
-
-    def __replace_line(self, line, value):
-        return re.sub(r'(.*)<value>[^<]*</value>(.*)', r'\g<1><value>' + value +
-                      r'</value>\g<2>', line)
 
     def format_dfs(self):
         """Format the distributed filesystem."""
