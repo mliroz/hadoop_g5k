@@ -158,6 +158,9 @@ class StaticDataset(Dataset):
             size = 0
             lock = threading.Lock()
 
+            def __init__(self):
+                pass
+
             def increment(self, qty):
                 self.lock.acquire()
                 try:

@@ -1,22 +1,23 @@
 import getpass
 import os
+import shutil
 import tempfile
+
 from execo import Get, Remote
 from execo.process import SshProcess
 from execo_engine import logger
 from execo_g5k import get_host_attributes
-import shutil
 
 from hadoop_g5k.cluster import HadoopCluster
-
-# Constant definitions
 from hadoop_g5k.util import replace_in_xml_file
 
+# Configuration files
 CORE_CONF_FILE = "core-site.xml"
 HDFS_CONF_FILE = "hdfs-site.xml"
 MR_CONF_FILE = "mapred-site.xml"
 YARN_CONF_FILE = "yarn-site.xml"
 
+# Default parameters
 DEFAULT_HADOOP_BASE_DIR = "/tmp/hadoop"
 DEFAULT_HADOOP_CONF_DIR = DEFAULT_HADOOP_BASE_DIR + "/etc/hadoop"
 DEFAULT_HADOOP_LOGS_DIR = DEFAULT_HADOOP_BASE_DIR + "/logs"
@@ -240,7 +241,7 @@ class HadoopV2Cluster(HadoopCluster):
                     "version of Hadoop.")
         
     def stop(self):
-        """Stop the JobTracker and TaskTracekrs and then the NameNode and
+        """Stop the JobTracker and TaskTrackers and then the NameNode and
         DataNodes."""
 
         self._check_initialization()

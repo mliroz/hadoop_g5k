@@ -19,11 +19,12 @@ DEFAULT_SPARK_PORT = 7077
 
 DEFAULT_SPARK_LOCAL_CONF_DIR = "spark-conf"
 
-JAVA_HOME="/usr/lib/jvm/java-7-openjdk-amd64"
-
 # Modes
 STANDALONE_MODE = 0
 YARN_MODE = 1
+
+# Other constants
+JAVA_HOME = "/usr/lib/jvm/java-7-openjdk-amd64"
 
 
 class SparkException(Exception):
@@ -52,6 +53,7 @@ class SparkCluster(object):
     initialized = False
     running_spark = False
 
+    # Default properties
     defaults = {
         "spark_base_dir": DEFAULT_SPARK_BASE_DIR,
         "spark_conf_dir": DEFAULT_SPARK_CONF_DIR,
@@ -113,10 +115,10 @@ class SparkCluster(object):
             self.hc = hadoop_cluster
         else:
             if mode == YARN_MODE:
-                logger.error("When using a YARN_MODE mode, a reference to the Hadoop"
-                             " cluster should be provided.")
-                raise SparkException("When using a YARN_MODE mode, a reference to "
-                                     "the Hadoop cluster should be provided")
+                logger.error("When using a YARN_MODE mode, a reference to the "
+                             "Hadoop cluster should be provided.")
+                raise SparkException("When using a YARN_MODE mode, a reference "
+                                     "to the Hadoop cluster should be provided")
 
     def bootstrap(self, spark_tar_file):
 

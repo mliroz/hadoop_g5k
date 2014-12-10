@@ -1,6 +1,8 @@
 import getpass
 import os
 import pickle
+import re
+import shutil
 import tempfile
 
 from execo.action import Remote
@@ -8,9 +10,9 @@ from execo.host import Host
 from execo.log import style
 from execo_engine import logger
 from execo_g5k import get_oar_job_nodes, get_oargrid_job_nodes
-import shutil
-import re
 
+
+# Imports #####################################################################
 
 def import_class(name):
     """Dynamically load a class and return a reference to it.
@@ -47,6 +49,8 @@ def import_function(name):
     mod = __import__(package_name, fromlist=[function_name])
     return getattr(mod, function_name)
 
+
+# Compression #################################################################
 
 def uncompress(file_name, host):
     if file_name.endswith("tar.gz"):
@@ -96,6 +100,8 @@ def uncompress(file_name, host):
     return new_name
 
 
+# Hosts #######################################################################
+
 def generate_hosts(hosts_input):
     """Generate a list of hosts from the given file.
 
@@ -127,6 +133,7 @@ def generate_hosts(hosts_input):
                  ' '.join(style.host(host.address.split('.')[0])
                           for host in hosts))
     return hosts
+
 
 # Serialization ###############################################################
 
@@ -266,7 +273,7 @@ def serialize_cluster(cluster_type, cid, cluster_object):
             serialize_cluster(ClusterType.HADOOP, hc_id, cluster_object.hc)
 
 
-def remove_cluster(cluster_type, cid, cluster_object):
+def remove_cluster(cluster_type, cid):
     """Remove temporary files created for the given cluster. Remove the linked
     Hadoop cluster if it exists.
 
@@ -275,8 +282,6 @@ def remove_cluster(cluster_type, cid, cluster_object):
         The type of cluster to serialize.
       cid (int):
         The id of the cluster.
-      cluster_object:
-        The cluster to remove.
     """
 
     fname = __get_cluster_file(cluster_type, cid)
@@ -304,6 +309,8 @@ def link_to_hadoop_cluster(cluster_type, cid, hc_id):
         link_file.write(str(hc_id))
 
 
+# Output formatting ###########################################################
+
 class ColorDecorator(object):
 
     defaultColor = '\033[0;0m'
@@ -319,6 +326,8 @@ class ColorDecorator(object):
         else:
             return getattr(self.component, attr)
 
+
+# Configuration functions #####################################################
 
 def replace_in_xml_file(f, name, value, create_if_absent=False):
     """Assign the given value to variable name in xml file f.

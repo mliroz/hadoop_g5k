@@ -5,6 +5,14 @@ from execo_engine import logger
 from execo_g5k.api_utils import get_host_attributes
 
 
+class HadoopException(Exception):
+    pass
+
+
+class HadoopJobException(HadoopException):
+    pass
+
+
 class HadoopTopology(object):
     """This class is able to produce and manage a Hadoop topology."""
 

@@ -1,4 +1,4 @@
-""" This module provides the classes and functions to interact with a Hadoop
+"""This module provides the classes and functions to interact with a Hadoop
 cluster.
 """
 

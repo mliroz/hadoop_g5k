@@ -5,24 +5,22 @@ import shutil
 import sys
 import tempfile
 
-try:  # Import Python 3 package, turn back to Python 2 if fails
-    import configparser
-except ImportError:
-    import ConfigParser as configparser
+from ConfigParser import ConfigParser
 
 from execo.action import Put, TaktukPut, Get, Remote
 from execo.process import SshProcess
 from execo_engine import logger
 from execo_g5k.api_utils import get_host_attributes, get_host_cluster
 
-from hadoop_g5k.objects import HadoopJarJob, HadoopTopology
+from hadoop_g5k.objects import HadoopJarJob, HadoopTopology, HadoopException
 from hadoop_g5k.util import ColorDecorator, replace_in_xml_file
 
-# Constant definitions
+# Configuration files
 CORE_CONF_FILE = "core-site.xml"
 HDFS_CONF_FILE = "hdfs-site.xml"
 MR_CONF_FILE = "mapred-site.xml"
 
+# Default parameters
 DEFAULT_HADOOP_BASE_DIR = "/tmp/hadoop"
 DEFAULT_HADOOP_CONF_DIR = DEFAULT_HADOOP_BASE_DIR + "/conf"
 DEFAULT_HADOOP_LOGS_DIR = DEFAULT_HADOOP_BASE_DIR + "/logs"
@@ -33,17 +31,12 @@ DEFAULT_HADOOP_MR_PORT = 54311
 
 DEFAULT_HADOOP_LOCAL_CONF_DIR = "conf"
 
-JAVA_HOME="/usr/lib/jvm/java-7-openjdk-amd64"
-
-class HadoopException(Exception):
-    pass
+# Other constants
+# TODO: is there a way to obtain JAVA_HOME automatically?
+JAVA_HOME = "/usr/lib/jvm/java-7-openjdk-amd64"
 
 
 class HadoopNotInitializedException(HadoopException):
-    pass
-
-
-class HadoopJobException(HadoopException):
     pass
 
 
@@ -56,21 +49,21 @@ class HadoopCluster(object):
     
     Attributes:
       master (Host):
-        The host selected as the master. It runs the namenode and
-        jobtracker.
+        The host selected as the master. It runs the NameNode and
+        JobTracker.
       hosts (list of Hosts):
-        List of hosts composing the cluster. All run datanode and tasktracker
+        List of hosts composing the cluster. All run DataNode and TaskTracker
         processes.
       topology (HadoopTopology):
         The topology of the cluster hosts.
       initialized (bool):
         True if the cluster has been initialized, False otherwise.
       running (bool):
-        True if both the namenode and jobtracker are running, False otherwise.
+        True if both the NameNode and JobTracker are running, False otherwise.
       running_dfs (bool):
-        True if the namenode is running, False otherwise.
+        True if the NameNode is running, False otherwise.
       running_map_reduce (bool):
-        True if the jobtracker is running, False otherwise.
+        True if the JobTracker is running, False otherwise.
     """
 
     # Cluster state
@@ -105,7 +98,7 @@ class HadoopCluster(object):
         """
 
         # Load cluster properties
-        config = configparser.ConfigParser(self.defaults)
+        config = ConfigParser(self.defaults)
         config.add_section("cluster")
         config.add_section("local")
 
@@ -191,7 +184,6 @@ class HadoopCluster(object):
 
         # 4. Specify environment variables
         command = "cat >> " + self.hadoop_conf_dir + "/hadoop-env.sh << EOF\n"
-        # TODO: is there a way to obtain JAVA_HOME automatically?
         command += "export JAVA_HOME=" + JAVA_HOME + "\n"
         command += "export HADOOP_LOG_DIR=" + self.hadoop_logs_dir + "\n"
         command += "HADOOP_HOME_WARN_SUPPRESS=\"TRUE\"\n"

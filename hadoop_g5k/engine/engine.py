@@ -4,12 +4,9 @@ import re
 import sys
 import time
 
-try:  # Import Python 3 package, turn back to Python 2 if fails
-    import configparser
-except ImportError:
-    import ConfigParser as configparser
+from ConfigParser import ConfigParser
 
-from execo.action import Get, Remote
+from execo.action import Get
 from execo.process import SshProcess
 from execo.time_utils import timedelta_to_seconds, format_date, get_seconds
 from execo_engine import logger
@@ -22,7 +19,7 @@ from execo_g5k.planning import get_jobs_specs, get_planning, compute_slots
 
 from networkx import DiGraph, NetworkXUnfeasible, topological_sort
 
-from hadoop_g5k.cluster import HadoopCluster, HadoopJarJob
+from hadoop_g5k.cluster import HadoopCluster
 from hadoop_g5k.objects import HadoopJarJob
 from hadoop_g5k.util import import_class
 
@@ -532,7 +529,7 @@ class HadoopEngine(Engine):
     def define_parameters(self):
         """Create the iterator that contains the parameters to be explored."""
 
-        config = configparser.ConfigParser()
+        config = ConfigParser()
         config.readfp(open(self.config_file))
 
         # TEST PARAMETERS

@@ -1,20 +1,16 @@
 #!/usr/bin/env python
 
-import getpass
 import os
-import pickle
 import sys
 import threading
 
 from argparse import ArgumentParser, RawTextHelpFormatter
-from pprint import pformat
 
 from execo.action import Get, Put, TaktukRemote
 from execo.host import Host
 from execo.log import style
 from execo.process import SshProcess
 from execo_engine import logger
-from execo_g5k import get_oar_job_nodes, get_oargrid_job_nodes
 
 from hadoop_g5k.cluster import HadoopCluster
 from hadoop_g5k.cluster_v2 import HadoopV2Cluster
@@ -97,7 +93,7 @@ if __name__ == "__main__":
                               dest="version",
                               nargs=1,
                               action="store",
-                              help="Hadoop version to be used.")
+                              help="Hadoop version to be used")
 
     object_group.add_argument("--properties",
                               dest="properties",
@@ -217,7 +213,7 @@ if __name__ == "__main__":
             if not hc_id:
                 logger.error("There is no available cluster. You must create a"
                              " new one")
-                sys.exit(3)
+                sys.exit(os.EX_DATAERR)
 
     logger.info("Using id = " + str(hc_id) + " (HADOOP)")
 
@@ -239,20 +235,20 @@ if __name__ == "__main__":
         if cluster_exists(ClusterType.HADOOP, hc_id):
             logger.error("There is a hadoop cluster with that id. You must "
                          "remove it before or chose another id")
-            sys.exit(1)
+            sys.exit(os.EX_DATAERR)
 
         hosts = generate_hosts(args.create[0])
 
         if args.version:
-            if args.version[0].startswith("0."):
+            if args.version[0] == "0" or args.version[0].startswith("0."):
                 hadoop_class = HadoopCluster
-            elif args.version[0].startswith("1."):
+            elif args.version[0] == "1" or args.version[0].startswith("1."):
                 hadoop_class = HadoopCluster
-            elif args.version[0].startswith("2."):
+            elif args.version[0] == "2" or args.version[0].startswith("2."):
                 hadoop_class = HadoopV2Cluster
             else:
                 logger.error("Unknown hadoop version")
-                sys.exit(2)
+                sys.exit(os.EX_DATAERR)
         else:
             hadoop_class = HadoopCluster
 
@@ -271,9 +267,9 @@ if __name__ == "__main__":
 
         # Remove hc dump file
         logger.info("Removing hc dump file from cluster")
-        remove_cluster(ClusterType.HADOOP, hc_id, hc)
+        remove_cluster(ClusterType.HADOOP, hc_id)
 
-        sys.exit(0)
+        sys.exit(os.EX_OK)
     else:
         # Deserialize
         hc = deserialize_cluster(ClusterType.HADOOP, hc_id)
@@ -303,7 +299,7 @@ if __name__ == "__main__":
         for f in local_paths:
             if not os.path.exists(f):
                 logger.error("Local path " + f + " does not exist")
-                sys.exit(4)
+                sys.exit(os.EX_NOINPUT)
 
         # Create dest directories if needed
         if hc.get_version().startswith("Hadoop 2."):
@@ -318,8 +314,8 @@ if __name__ == "__main__":
         actionCreate.run()
 
         def copy_function(host, files_to_copy):
-            action = Put([host], files_to_copy, tmp_dir)
-            action.run()
+            action_copy = Put([host], files_to_copy, tmp_dir)
+            action_copy.run()
 
             for f in files_to_copy:
                 src_file = os.path.join(tmp_dir, os.path.basename(f))

@@ -2,17 +2,11 @@
 
 import os
 import sys
-import threading
 
 from argparse import ArgumentParser, RawTextHelpFormatter
-from pprint import pformat
 
-from execo.action import Get, Put, TaktukRemote
-from execo.host import Host
 from execo.log import style
-from execo.process import SshProcess
 from execo_engine import logger
-from execo_g5k import get_oar_job_nodes, get_oargrid_job_nodes
 
 from hadoop_g5k.ecosystem.spark import SparkCluster, STANDALONE_MODE, YARN_MODE
 from hadoop_g5k.util import generate_hosts, generate_new_id, ClusterType, \
@@ -154,7 +148,7 @@ if __name__ == "__main__":
             if not sc_id:
                 logger.error("There is no available cluster. You must create a"
                              " new one")
-                sys.exit(3)
+                sys.exit(os.EX_DATAERR)
 
     logger.info("Using id = " + str(sc_id) + " (SPARK)")
 
@@ -168,7 +162,7 @@ if __name__ == "__main__":
         if cluster_exists(ClusterType.SPARK, sc_id):
             logger.error("There is a Spark cluster with that id. You must "
                          "remove it before or chose another id")
-            sys.exit(1)
+            sys.exit(os.EX_DATAERR)
 
         if args.create[0].upper() == "STANDALONE":
             mode = STANDALONE_MODE
@@ -177,11 +171,12 @@ if __name__ == "__main__":
         else:
             logger.error("Unrecognized mode. It should be either STANDALONE or"
                          "YARN.")
+            sys.exit(os.EX_DATAERR)
 
         if not (args.nodes or args.hid):
             logger.error("Nodes in the cluster must be specified either "
                          "directly or indirectly through a Hadoop cluster.")
-            sys.exit(2)
+            sys.exit(os.EX_USAGE)
 
         hosts = generate_hosts(args.nodes[0]) if args.nodes else None
 
@@ -209,9 +204,9 @@ if __name__ == "__main__":
 
         # Remove hc dump file
         logger.info("Removing hc dump file from cluster")
-        remove_cluster(ClusterType.SPARK, sc_id, sc)
+        remove_cluster(ClusterType.SPARK, sc_id)
 
-        sys.exit(0)
+        sys.exit(os.EX_OK)
     else:
 
         # Deserialize
