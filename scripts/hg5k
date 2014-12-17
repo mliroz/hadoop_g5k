@@ -306,7 +306,7 @@ if __name__ == "__main__":
             hc.execute("fs -mkdir -p " + dest, verbose=False)
 
         # Define and create temp dir
-        tmp_dir = "/tmp" + dest
+        tmp_dir = "/tmp/hg5k_dest"
         hosts = hc.hosts
         actionRemove = TaktukRemote("rm -rf " + tmp_dir, hosts)
         actionRemove.run()
@@ -318,14 +318,16 @@ if __name__ == "__main__":
             action_copy.run()
 
             for f in files_to_copy:
-                if hc.get_version().startswith("Hadoop 2."):
-                    src_file = os.path.join(tmp_dir, f)
-                else:
-                    src_file = os.path.join(tmp_dir, os.path.basename(f))
+                dest_suffix = os.path.basename(os.path.normpath(f))
+                src_file = os.path.join(tmp_dir, dest_suffix)
 
-                hc.execute("fs -put " + src_file + " " +
-                           os.path.join(dest, os.path.basename(src_file)),
-                           host, True, False)
+                if hc.get_version().startswith("Hadoop 2."):
+                    hc.execute("fs -put " + src_file + " " + dest,
+                               host, True, False)
+                else:
+                    hc.execute("fs -put " + src_file + " " +
+                                            os.path.join(dest, dest_suffix),
+                               host, True, False)
 
         # Assign files to hosts
         files_per_host = [[]] * len(hosts)
