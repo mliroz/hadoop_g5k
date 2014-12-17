@@ -120,6 +120,15 @@ class SparkCluster(object):
                 raise SparkException("When using a YARN_MODE mode, a reference "
                                      "to the Hadoop cluster should be provided")
 
+        if self.mode == STANDALONE_MODE:
+            mode_text = " in standalone mode"
+        else:
+            mode_text = " on top of YARN "
+
+        logger.info("Spark cluster created " + mode_text + " in hosts " +
+                    str(self.hosts) + "." +
+                    " It is linked to a Hadoop cluster." if self.hc else "")
+
     def bootstrap(self, spark_tar_file):
 
         # 1. Remove used dirs if existing
@@ -317,12 +326,6 @@ class SparkCluster(object):
             if not proc.finished_ok:
                 logger.warn("Error while stopping Spark")
                 return
-        elif self.mode == YARN_MODE:
-            if not self.hc.running_yarn:
-                self.hc.stop_yarn()
-        else:
-            logger.error("Mode is not set")
-            sys.exit(1)
 
         self.running_spark = False
 
