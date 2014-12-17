@@ -318,7 +318,10 @@ if __name__ == "__main__":
             action_copy.run()
 
             for f in files_to_copy:
-                src_file = os.path.join(tmp_dir, os.path.basename(f))
+                if hc.get_version().startswith("Hadoop 2."):
+                    src_file = os.path.join(tmp_dir, f)
+                else:
+                    src_file = os.path.join(tmp_dir, os.path.basename(f))
 
                 hc.execute("fs -put " + src_file + " " +
                            os.path.join(dest, os.path.basename(src_file)),
@@ -424,16 +427,19 @@ if __name__ == "__main__":
                 (stdout, stderr) = hc.execute("fs -lsr /", verbose=False)
             print ""
             for line in stdout.splitlines():
-                if "WARN fs.FileSystem" not in line:
+                if line.startswith("d") or line.startswith("-"):
                     print line
             print ""
 
             if hc.get_version().startswith("Hadoop 2."):
                 (stdout, stderr) = hc.execute("fs -du -s /", verbose=False)
                 for line in stdout.splitlines():
-                    if "WARN" not in line:
-                        pos = line.rfind("\t")
-                        size = int(line[:pos])
+                    if "WARN" not in line and "warning" not in line:
+                        try:
+                            pos = line.rfind("\t")
+                            size = int(line[:pos])
+                        except:
+                            size = -1
             else:
                 (stdout, stderr) = hc.execute("fs -dus /", verbose=False)
                 pos = stdout.rfind("\t")
