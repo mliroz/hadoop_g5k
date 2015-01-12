@@ -613,7 +613,7 @@ class HadoopCluster(object):
 
         return (proc.stdout, proc.stderr)
 
-    def execute_jar(self, job, node=None, verbose=True):
+    def execute_job(self, job, node=None, verbose=True):
         """Execute the given MapReduce job in the specified node.
         
         Args:

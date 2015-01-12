@@ -386,7 +386,7 @@ if __name__ == "__main__":
 
         job = HadoopJarJob(args.jarjob[0], args.jarjob[1:], libjars)
 
-        hc.execute_jar(job, verbose=verbose, node=node_host)
+        hc.execute_job(job, verbose=verbose, node=node_host)
         if job.success:
             print "Job with id " + job.job_id + " finished successfully"
         else:

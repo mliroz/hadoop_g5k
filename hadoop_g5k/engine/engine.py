@@ -823,7 +823,7 @@ class HadoopEngine(Engine):
         job = self._create_hadoop_job(comb)
 
         # Execute job
-        self.hc.execute_jar(job)
+        self.hc.execute_job(job)
         self._update_summary(comb, job)
 
         # Post-execution

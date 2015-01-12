@@ -264,6 +264,6 @@ class DynamicDataset(Dataset):
             The size of the data to be copied.
         """
 
-        hc.execute_jar(self.job)
+        hc.execute_job(self.job)
 
         self.deployments[hc, desired_size] = dest
