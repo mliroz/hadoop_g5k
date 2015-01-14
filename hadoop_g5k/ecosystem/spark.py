@@ -4,11 +4,15 @@ import sys
 import tempfile
 import time
 
+from abc import ABCMeta, abstractmethod
+
 from ConfigParser import ConfigParser
+from subprocess import call
 
 from execo.action import Put, TaktukPut, Get, Remote
 from execo.process import SshProcess
 from execo_engine import logger
+from execo_g5k import get_host_attributes
 
 from hadoop_g5k.util import ColorDecorator
 
@@ -29,6 +33,150 @@ JAVA_HOME = "/usr/lib/jvm/java-7-openjdk-amd64"
 
 class SparkException(Exception):
     pass
+
+
+class SparkJobException(SparkException):
+    pass
+
+
+class SparkJob(object):
+    """This class represents a Spark job.
+
+    Attributes:
+      job_path (str):
+        The local path of the file containing the job binaries.
+      params (list of str):
+        The list of parameters of the job.
+      lib_paths (list of str):
+        The list of local paths to the libraries used by the job.
+      state (int):
+        State of the job.
+      success (bool):
+        Indicates whether the job have finished successfully or not. Before
+        executing its value is None.
+    """
+
+    state = -1
+    success = None
+
+    def __init__(self, job_path, params=None, lib_paths=None):
+        """Create a new Spark job with the given parameters.
+
+        Args:
+          job_path (str):
+            The local path of the file containing the job binaries.
+          params (list of str, optional):
+            The list of parameters of the job.
+          lib_paths (list of str, optional):
+            The list of local paths to the libraries used by the job.
+        """
+
+        if not params:
+            params = []
+        if not lib_paths:
+            lib_paths = []
+
+        # Check if the jar file exists
+        if not os.path.exists(job_path):
+            logger.error("Job binaries file " + job_path + " does not exist")
+            raise SparkJobException("Job binaries file " + job_path +
+                                    " does not exist")
+
+        # Check if the libraries exist
+        for lp in lib_paths:
+            if not os.path.exists(lp):
+                logger.warn("Lib file " + lp + " does not exist")
+                return  # TODO - exception
+
+        self.job_path = job_path
+        self.params = params
+        self.lib_paths = lib_paths
+
+    def get_files_to_copy(self):
+        """Return the set of files that are used by the job and need to be
+        copied to the cluster. This includes among others the job binaries and
+        the used libraries."""
+
+        # Copy jar and lib files to cluster
+        files_to_copy = [self.job_path]
+        for lp in self.lib_paths:
+            files_to_copy.append(lp)
+
+        return files_to_copy
+
+    @abstractmethod
+    def get_command(self, exec_dir="."):
+        pass
+
+
+class PythonSparkJob(SparkJob):
+
+    def get_command(self, exec_dir="."):
+
+        # Get parameters
+        job_file = os.path.join(exec_dir, os.path.basename(self.job_path))
+        if self.lib_paths:
+            libs_param = "--py_files " + \
+                         ",".join(os.path.join(exec_dir, os.path.basename(lp))
+                                  for lp in self.lib_paths) + \
+                         " "
+        else:
+            libs_param = ""
+
+        if isinstance(self.params, basestring):
+            params_str = " " + self.params
+        else:
+            params_str = " " + " ".join(self.params)
+
+        return libs_param + job_file + params_str
+
+
+class ScalaSparkJob(SparkJob):
+
+    def __init__(self, job_path, params=None, lib_paths=None, main_class=None):
+
+        super(ScalaSparkJob, self).__init__(job_path, params, lib_paths)
+
+        if not main_class:
+            call("/usr/bin/jar xf " +
+                 os.path.abspath(job_path) + " META-INF/MANIFEST.MF",
+                 cwd="/tmp", shell=True)
+            if os.path.exists("/tmp/META-INF/MANIFEST.MF"):
+                with open("/tmp/META-INF/MANIFEST.MF") as mf:
+                    for line in mf:
+                        if line.startswith("Main-Class:"):
+                            main_class = line.strip().split(" ")[1]
+                            break
+                    else:
+                        raise SparkJobException("A main class should be " +
+                                                "provided or specified in the" +
+                                                " jar manifest")
+            else:
+                raise SparkJobException("A main class should be provided or " +
+                                        "specified in the jar manifest")
+
+        self.main_class = main_class
+
+    def get_command(self, exec_dir="."):
+
+        # Get parameters
+        job_file = os.path.join(exec_dir, os.path.basename(self.job_path))
+        if self.lib_paths:
+            libs_param = "--jars " + \
+                         ",".join(os.path.join(exec_dir, os.path.basename(lp))
+                                  for lp in self.lib_paths) + \
+                         " "
+        else:
+            libs_param = ""
+
+        if isinstance(self.params, basestring):
+            params_str = " " + self.params
+        else:
+            params_str = " " + " ".join(self.params)
+
+        main_class = "--class " + self.main_class + " "
+
+        return main_class + libs_param + job_file + params_str
 
 
 class SparkCluster(object):
@@ -179,7 +327,7 @@ class SparkCluster(object):
 
         # Set basic configuration
         self._copy_base_conf()
-        self._create_slaves_conf()
+        self._create_master_and_slave_conf()
         self._copy_conf(self.conf_dir, self.hosts)
 
         self._configure_servers(self.hosts)
@@ -229,13 +377,17 @@ class SparkCluster(object):
         action = Get([self.master], remote_missing_files, self.conf_dir)
         action.run()
 
-    def _create_slaves_conf(self):
-        """Create slaves configuration files."""
+    def _create_master_and_slave_conf(self):
+        """Configure master and create slaves configuration files."""
 
-        slaves_file = open(self.conf_dir + "/slaves", "w")
-        for s in self.hosts:
-            slaves_file.write(s.address + "\n")
-        slaves_file.close()
+        with open(self.conf_dir + "/spark-defaults.conf", "a") as defaults_file:
+            defaults_file.write("spark.master\t"
+                                "spark://" + self.master.address + ":" +
+                                             str(self.spark_port))
+
+        with open(self.conf_dir + "/slaves", "w") as slaves_file:
+            for s in self.hosts:
+                slaves_file.write(s.address + "\n")
 
     def _copy_conf(self, conf_dir, hosts=None):
         """Copy configuration files from given dir to remote dir in cluster
@@ -275,7 +427,18 @@ class SparkCluster(object):
         if not hosts:
             hosts = self.hosts
 
-        # TODO
+        host_attrs = get_host_attributes(hosts[0])
+        num_cores = host_attrs[u'architecture'][u'smt_size']
+        total_memory_mb = (int(host_attrs[u'main_memory'][u'ram_size']) /
+                           (1024 * 1024))
+        memory_per_worker = int(0.75 * total_memory_mb)
+
+        # Set memory for each worker
+        command = "cat >> " + self.spark_conf_dir + "/spark-env.sh << EOF\n"
+        command += "SPARK_WORKER_MEMORY=" + str(memory_per_worker) + "\n"
+        command += "EOF\n"
+        action = Remote(command, self.hosts)
+        action.run()
 
     def start(self):
         """Start spark processes."""
@@ -329,41 +492,95 @@ class SparkCluster(object):
 
         self.running_spark = False
 
-    def start_shell(self, language="python"):
+    def start_shell(self, language="IPYTHON", node=None):
         """Open a Spark shell."""
+
+        if not node:
+            node = self.master
 
         if self.mode == YARN_MODE:
             options = " --master yarn-client "
         else:
             options = ""
 
-        if language == "python":
-            proc = SshProcess(self.spark_bin_dir + "/pyspark" + options,
-                              self.master)
-        elif language == "scala":
-            proc = SshProcess(self.spark_bin_dir + "/spark-shell" + options,
-                              self.master)
+        if language.upper() == "IPYTHON":
+            call("ssh -t " + node.address + " " +
+                 "IPYTHON=1 " + self.spark_bin_dir + "/pyspark" + options,
+                 shell=True)
+        elif language.upper() == "PYTHON":
+            call("ssh -t " + node.address + " " +
+                 self.spark_bin_dir + "/pyspark" + options,
+                 shell=True)
+        elif language.upper() == "SCALA":
+            call("ssh -t " + node.address + " " +
+                 self.spark_bin_dir + "/spark-shell" + options,
+                 shell=True)
         else:
             logger.error("Unknown language " + language)
             return
-
-        red_color = '\033[01;31m'
-        proc.stdout_handlers.append(sys.stdout)
-        proc.stderr_handlers.append(ColorDecorator(sys.stderr, red_color))
-        proc.close_stdin = False
-        proc.start()
-        time.sleep(1)
-        line = sys.stdin.readline()
-        proc.process.stdin.write(line)
-        while line.strip() != "exit()":
-            line = sys.stdin.readline()
-            proc.process.stdin.write(line)
 
     def is_on_top_of_yarn(self):
         return self.mode == YARN_MODE
 
     def is_standalone(self):
         return self.mode == STANDALONE_MODE
+
+    def execute_job(self, job, node=None, verbose=True):
+        """Execute the given Spark job in the specified node.
+
+        Args:
+          job (SparkJob):
+            The job object.
+          node (Host, optional):
+            The host were the command should be executed. If not provided,
+            self.master is chosen.
+          verbose (bool, optional):
+            If True stdout and stderr of remote process is displayed.
+
+        Returns (tuple of str):
+          A tuple with the standard and error outputs of the process executing
+          the job.
+        """
+
+        if not self.running_spark:
+            logger.warn("The cluster was stopped. Starting it automatically")
+            self.start()
+
+        if not node:
+            node = self.master
+
+        exec_dir = "/tmp"
+
+        # Copy necessary files to cluster
+        files_to_copy = job.get_files_to_copy()
+        action = Put([node], files_to_copy, exec_dir)
+        action.run()
+
+        # Get command
+        command = job.get_command(exec_dir)
+
+        # Execute
+        logger.info("Executing spark job. Command = {" + self.spark_bin_dir +
+                    "/spark-submit " + command + "} in " + str(node))
+
+        proc = SshProcess(self.spark_bin_dir + "/spark-submit " + command, node)
+
+        if verbose:
+            red_color = '\033[01;31m'
+
+            proc.stdout_handlers.append(sys.stdout)
+            proc.stderr_handlers.append(
+                ColorDecorator(sys.stderr, red_color))
+
+        proc.start()
+        proc.wait()
+
+        # Get job info
+        job.stdout = proc.stdout
+        job.stderr = proc.stderr
+        job.success = (proc.exit_code == 0)
+
+        return (proc.stdout, proc.stderr)
 
     def clean(self):
         """Remove all files created by Spark."""
