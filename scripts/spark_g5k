@@ -40,27 +40,6 @@ if __name__ == "__main__":
                          help="The identifier of the cluster. If not indicated"
                                 ", last used cluster will be used (if any)")
 
-    actions.add_argument("--node",
-                         action="store",
-                         nargs=1,
-                         metavar="NODE",
-                         help="Node where the action will be executed. Applies"
-                                " only to --shell, --scala_job and --py_job")
-
-    actions.add_argument("--libjars",
-                         action="store",
-                         nargs="+",
-                         metavar="LIB_JARS",
-                         help="A list of libraries to be used in job execution"
-                                ". Applies only to --scala_job and --py_job")
-
-    actions.add_argument("--main_class",
-                         action="store",
-                         nargs=1,
-                         metavar="CLASS",
-                         help="The class to be executed. Applies only to "
-                              "--scala_job")
-
     verbose_group = actions.add_mutually_exclusive_group()
 
     verbose_group.add_argument("-v", "--verbose",
@@ -177,6 +156,39 @@ if __name__ == "__main__":
                          action="store_true",
                          help="Remove files created by Spark")
 
+    exec_opts = parser.add_argument_group(style.host("Execution options"),
+                                          "Parameters for the execution of "
+                                          "jobs. Apply only to --scala_job, "
+                                          "--py_job and --shell")
+
+    exec_opts.add_argument("--node",
+                           action="store",
+                           nargs=1,
+                           metavar="NODE",
+                           help="Node where the action will be executed")
+
+    exec_opts.add_argument("--lib_paths",
+                           action="store",
+                           nargs="+",
+                           metavar="LIB_JARS",
+                           help="A list of libraries to be used in job "
+                                "execution")
+
+    exec_opts.add_argument("--main_class",
+                           action="store",
+                           nargs=1,
+                           metavar="CLASS",
+                           help="The class to be executed. Only applies to "
+                                "--scala_job")
+
+    exec_opts.add_argument("--exec_params",
+                           action="store",
+                           nargs="+",
+                           metavar="PARAM",
+                           help="The options for job execution. Options should "
+                                "be written without the \"--\" prefix (e.g., "
+                                "--exec_params driver-memory=1g)")
+
     args = parser.parse_args()
 
     # Get id
@@ -197,14 +209,6 @@ if __name__ == "__main__":
     verbose = True
     if args.quiet:
         verbose = False
-
-    # Check node specification
-    node_host = None
-    if args.node:
-        if not (args.shell or args.py_job or args.scala_job):
-            logger.warn("--node only applies to shell, --scala_job or --py_job")
-        else:
-            node_host = Host(args.node[0])
 
     # Create or load object
     if args.create:
@@ -272,25 +276,49 @@ if __name__ == "__main__":
     if args.start:
         sc.start()
 
-    if args.shell:
-        node_host = args.node if args.node else None
-        sc.start_shell(language=args.shell, node=node_host)
-    elif args.scala_job or args.py_job:
-        node_host = args.node if args.node else None
-        libjars = args.libjars if args.libjars else None
+    if args.shell or args.scala_job or args.py_job:
+        node_host = Host(args.node[0]) if args.node else None
+        lib_paths = args.lib_paths if args.lib_paths else None
 
-        if args.scala_job:
-            main_class = args.main_class[0] if args.main_class else None
-            job = ScalaSparkJob(args.scala_job[0], args.scala_job[1:],
-                                libjars, main_class)
-        else:  # elif args.py_job:
-            job = PythonSparkJob(args.py_job[0], args.py_job[1:], libjars)
-
-        sc.execute_job(job, verbose=verbose, node=node_host)
-        if job.success:
-            print "Job finished successfully"
+        if args.exec_params:
+            exec_params = ["--" + p.replace("=", " ") for p in args.exec_params]
         else:
-            print "Job finished with errors"
+            exec_params = None
+
+        if args.shell:
+            sc.start_shell(language=args.shell,
+                           node=node_host,
+                           exec_params=exec_params)
+        elif args.scala_job or args.py_job:
+            if args.scala_job:
+                main_class = args.main_class[0] if args.main_class else None
+                job = ScalaSparkJob(job_path=args.scala_job[0],
+                                    exec_params=exec_params,
+                                    app_params=args.scala_job[1:],
+                                    lib_paths=lib_paths,
+                                    main_class=main_class)
+            else:  # elif args.py_job:
+                job = PythonSparkJob(job_path=args.py_job[0],
+                                     exec_params=exec_params,
+                                     app_params=args.py_job[1:],
+                                     lib_paths=lib_paths)
+
+            sc.execute_job(job, verbose=verbose, node=node_host)
+            if job.success:
+                print "Job finished successfully"
+            else:
+                print "Job finished with errors"
+
+    else:
+        if args.node:
+            logger.warn("--node only applies to --scala_job, --py_job or "
+                        "--shell. Ignoring argument")
+        if args.exec_params:
+            logger.warn("--exec_params only applies to --scala_job, --py_job or"
+                        " --shell. Ignoring argument")
+        if args.lib_paths:
+            logger.warn("--lib_paths only applies to --scala_job, --py_job or"
+                        " --shell. Ignoring argument")
 
     if args.stop:
         sc.stop()
