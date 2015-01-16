@@ -292,9 +292,9 @@ class SparkCluster(object):
                                      "to the Hadoop cluster should be provided")
 
         if self.mode == STANDALONE_MODE:
-            mode_text = " in standalone mode"
+            mode_text = "in standalone mode"
         else:
-            mode_text = " on top of YARN "
+            mode_text = "on top of YARN"
 
         logger.info("Spark cluster created " + mode_text + " in hosts " +
                     str(self.hosts) + "." +
@@ -406,9 +406,12 @@ class SparkCluster(object):
         """Configure master and create slaves configuration files."""
 
         with open(self.conf_dir + "/spark-defaults.conf", "a") as defaults_file:
-            defaults_file.write("spark.master\t"
-                                "spark://" + self.master.address + ":" +
-                                             str(self.spark_port) + "\n")
+            if self.mode == STANDALONE_MODE:
+                defaults_file.write("spark.master\t"
+                                    "spark://" + self.master.address + ":" +
+                                                 str(self.spark_port) + "\n")
+            elif self.mode == YARN_MODE:
+                defaults_file.write("spark.master\tyarn-client\n")
 
         with open(self.conf_dir + "/slaves", "w") as slaves_file:
             for s in self.hosts:
