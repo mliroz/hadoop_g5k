@@ -117,8 +117,10 @@ class HadoopV2Cluster(HadoopCluster):
 
         host_attrs = get_host_attributes(hosts[0])
         num_cores = host_attrs[u'architecture'][u'smt_size']
-        total_memory_mb = (int(host_attrs[u'main_memory'][u'ram_size']) /
-                           (1024 * 1024)) - 2 * 1024
+        available_memory = (int(host_attrs[u'main_memory'][u'ram_size']) /
+                            (1024 * 1024))
+        total_memory_mb = min(available_memory - 2 * 1024,
+                              int(0.75 * available_memory))
         mem_per_task_mb = total_memory_mb / (num_cores - 1)
 
         replace_in_xml_file(os.path.join(self.conf_dir, CORE_CONF_FILE),
@@ -162,6 +164,9 @@ class HadoopV2Cluster(HadoopCluster):
         replace_in_xml_file(os.path.join(self.conf_dir, YARN_CONF_FILE),
                             "yarn.nodemanager.resource.cpu-vcores",
                             str(num_cores - 1), True)
+        replace_in_xml_file(os.path.join(self.conf_dir, YARN_CONF_FILE),
+                            "yarn.scheduler.maximum-allocation-mb",
+                            str(total_memory_mb), True)
         replace_in_xml_file(os.path.join(self.conf_dir, YARN_CONF_FILE),
                             "yarn.nodemanager.aux-services",
                             "mapreduce_shuffle", True)
