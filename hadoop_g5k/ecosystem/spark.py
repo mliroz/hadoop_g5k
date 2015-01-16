@@ -2,9 +2,8 @@ import os
 import shutil
 import sys
 import tempfile
-import time
 
-from abc import ABCMeta, abstractmethod
+from abc import abstractmethod
 
 from ConfigParser import ConfigParser
 from subprocess import call
@@ -20,6 +19,7 @@ from hadoop_g5k.util import ColorDecorator
 DEFAULT_SPARK_BASE_DIR = "/tmp/spark"
 DEFAULT_SPARK_CONF_DIR = DEFAULT_SPARK_BASE_DIR + "/conf"
 DEFAULT_SPARK_LOGS_DIR = DEFAULT_SPARK_BASE_DIR + "/logs"
+DEFAULT_SPARK_WORK_DIR = DEFAULT_SPARK_BASE_DIR + "/work"
 DEFAULT_SPARK_PORT = 7077
 
 DEFAULT_SPARK_LOCAL_CONF_DIR = "spark-conf"
@@ -224,6 +224,7 @@ class SparkCluster(object):
         "spark_base_dir": DEFAULT_SPARK_BASE_DIR,
         "spark_conf_dir": DEFAULT_SPARK_CONF_DIR,
         "spark_logs_dir": DEFAULT_SPARK_LOGS_DIR,
+        "spark_work_dir": DEFAULT_SPARK_WORK_DIR,
         "spark_port": str(DEFAULT_SPARK_PORT),
 
         "local_base_conf_dir": DEFAULT_SPARK_LOCAL_CONF_DIR
@@ -256,6 +257,8 @@ class SparkCluster(object):
         self.spark_base_dir = config.get("cluster", "spark_base_dir")
         self.spark_conf_dir = config.get("cluster", "spark_conf_dir")
         self.spark_logs_dir = config.get("cluster", "spark_logs_dir")
+        self.spark_event_log_dir = self.spark_logs_dir + "/events"
+        self.spark_work_dir = config.get("cluster", "spark_work_dir")
         self.spark_port = config.getint("cluster", "spark_port")
         self.local_base_conf_dir = config.get("local", "local_base_conf_dir")
 
@@ -471,10 +474,12 @@ class SparkCluster(object):
         with open(self.conf_dir + "/spark-defaults.conf", "a") as defaults_file:
             defaults_file.write("spark.executor.memory\t" + executor_mem + "\n")
             defaults_file.write("spark.driver.memory\t" + driver_mem + "\n")
-            #defaults_file.write("spark.driver.maxResultSize\t1g\n")
+            # defaults_file.write("spark.driver.maxResultSize\t1g\n")
             defaults_file.write("spark.logConf\ttrue\n")
-            #defaults_file.write("spark.python.worker.memory\t512m")
+            # defaults_file.write("spark.python.worker.memory\t512m")
             defaults_file.write("spark.eventLog.enabled\ttrue\n")
+            defaults_file.write("spark.eventLog.dir\t" +
+                                self.spark_event_log_dir + "\n")
 
     def start(self):
         """Start spark processes."""
@@ -631,7 +636,32 @@ class SparkCluster(object):
         job.stderr = proc.stderr
         job.success = (proc.exit_code == 0)
 
-        return (proc.stdout, proc.stderr)
+        return proc.stdout, proc.stderr
+
+    def clean_conf(self):
+        """Clean configuration files used by this cluster."""
+
+        if self.conf_dir and os.path.exists(self.conf_dir):
+            shutil.rmtree(self.conf_dir)
+
+    def clean_logs(self):
+        """Remove all Spark logs."""
+
+        logger.info("Cleaning logs")
+
+        restart = False
+        if self.running_spark:
+            logger.warn("The cluster needs to be stopped before cleaning.")
+            self.stop()
+            restart = True
+
+        action = Remote("rm -rf " + self.spark_logs_dir + "/* " +
+                                    self.spark_work_dir + "/*",
+                        self.hosts)
+        action.run()
+
+        if restart:
+            self.start()
 
     def clean(self):
         """Remove all files created by Spark."""
@@ -640,7 +670,8 @@ class SparkCluster(object):
             logger.warn("The cluster needs to be stopped before cleaning.")
             self.stop()
 
-        # TODO
+        self.clean_conf()
+        self.clean_logs()
 
         self.initialized = False
 
@@ -648,4 +679,33 @@ class SparkCluster(object):
         """Stop previous Spark processes (if any) and remove all remote files
         created by it."""
 
-        # TODO
+        spark_processes = [
+            "Master",
+            "Worker"
+        ]
+
+        force_kill = False
+        for h in self.hosts:
+            proc = SshProcess("jps", self.master)
+            proc.run()
+
+            ids_to_kill = []
+            for line in proc.stdout.splitlines():
+                field = line.split()
+                if field[1] in spark_processes:
+                    ids_to_kill.append(field[0])
+
+            if ids_to_kill:
+                force_kill = True
+                ids_to_kill_str = ""
+                for pid in ids_to_kill:
+                    ids_to_kill_str += " " + pid
+
+                proc = SshProcess("kill -9" + ids_to_kill_str, h)
+                proc.run()
+
+        if force_kill:
+            logger.info(
+                "Processes from previous hadoop deployments had to be killed")
+
+        self.clean_logs()
