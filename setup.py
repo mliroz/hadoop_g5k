@@ -7,7 +7,7 @@ setup(
   version="0.1",
 
   packages=["hadoop_g5k", "hadoop_g5k/engine", "hadoop_g5k/ecosystem"],
-  scripts=["scripts/hg5k", "scripts/hadoop_engine", "scripts/spark_g5k"],
+  scripts=["scripts/hg5k", "scripts/hadoop_engine", "scripts/spark_g5k", "scripts/mahout_g5k"],
 
   install_requires=["execo", " networkx"],
 

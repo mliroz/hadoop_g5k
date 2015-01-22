@@ -144,7 +144,7 @@ serialize_base = "/tmp/" + __user_login + "_"
 def enum(**enums):
     return type('Enum', (), enums)
 
-ClusterType = enum(HADOOP="hg5k", SPARK="spark")
+ClusterType = enum(HADOOP="hg5k", SPARK="spark", MAHOUT="mahout")
 
 
 def __get_clusters_dir(cluster_type):

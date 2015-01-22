@@ -1,0 +1,200 @@
+#!/usr/bin/env python
+
+import os
+import sys
+
+from argparse import ArgumentParser, RawTextHelpFormatter
+from execo import Host
+
+from execo.log import style
+from execo_engine import logger
+from hadoop_g5k.ecosystem.mahout import MahoutCluster
+
+from hadoop_g5k.util import generate_new_id, ClusterType, \
+    get_default_id, deserialize_cluster, remove_cluster, serialize_cluster, \
+    cluster_exists, link_to_hadoop_cluster
+
+
+if __name__ == "__main__":
+
+    prog = "mahout_g5k"
+    description = "This tool helps you to manage a Mahout cluster in Grid5000."
+    parser = ArgumentParser(prog=prog,
+                            description=description,
+                            formatter_class=RawTextHelpFormatter,
+                            add_help=False)
+
+    actions = parser.add_argument_group(style.host("General options"),
+                                        "Options to be used generally "
+                                        "with Mahout actions.")
+
+    actions.add_argument("-h", "--help",
+                         action="help",
+                         help="Show this help message and exit")
+
+    actions.add_argument("--id",
+                         action="store",
+                         nargs=1,
+                         metavar="ID",
+                         help="The identifier of the cluster. If not indicated"
+                                ", last used cluster will be used (if any)")
+
+    actions.add_argument("--node",
+                         action="store",
+                         nargs=1,
+                         metavar="NODE",
+                         help="Node where the action will be executed. Applies"
+                                " only to --execute")
+
+    verbose_group = actions.add_mutually_exclusive_group()
+
+    verbose_group.add_argument("-v", "--verbose",
+                               dest="verbose",
+                               action="store_true",
+                               help="Run in verbose mode")
+
+    verbose_group.add_argument("-q", "--quiet",
+                               dest="quiet",
+                               action="store_true",
+                               help="Run in quiet mode")
+
+    object_group = parser.add_argument_group(style.host("Object management "
+                                                        "options"),
+                                             "Options to create and destroy "
+                                             "Mahout cluster objects")
+
+    object_mutex_group = object_group.add_mutually_exclusive_group()
+
+    object_mutex_group.add_argument("--create",
+                                    metavar="ID",
+                                    nargs=1,
+                                    action="store",
+                                    help="Create the cluster linked to the "
+                                         "Hadoop cluster with the given "
+                                         "identifier.")
+
+    object_mutex_group.add_argument("--delete",
+                                    dest="delete",
+                                    action="store_true",
+                                    help="Remove all files used by the cluster")
+
+    object_group.add_argument("--properties",
+                              dest="properties",
+                              nargs=1,
+                              action="store",
+                              help="File containing the properties to be used "
+                              "(INI file). Applies only to --create")
+
+    object_group.add_argument("--bootstrap",
+                              metavar="MAHOUT_TAR",
+                              nargs=1,
+                              action="store",
+                              help="Install Mahout in the cluster nodes taking"
+                                   " into account the specified properties.\n"
+                                   "MAHOUT_TAR defines the path of the .tar.gz "
+                                   "file containing Mahout binaries.")
+
+    actions = parser.add_argument_group(style.host("Mahout actions"),
+                                        "Actions to execute in the Mahout "
+                                        "cluster. Several options can be "
+                                        "indicated at the same time.\n"
+                                        "The order of execution is fixed no "
+                                        "matter the order used in the "
+                                        "arguments: it follows the order\n"
+                                        "of the options.")
+
+    actions.add_argument("--initialize",
+                         dest="initialize",
+                         action="store_true",
+                         help="Initialize cluster: Copy configuration")
+
+    actions.add_argument("--execute",
+                         dest="execute",
+                         action="store",
+                         help="Initialize cluster: Copy configuration")
+
+    actions.add_argument("--clean",
+                         dest="clean",
+                         action="store_true",
+                         help="Remove files created by Mahout")
+
+    args = parser.parse_args()
+
+    # Get id
+    if args.id:
+        mc_id = int(args.id[0])
+    else:
+        if args.create:
+            mc_id = generate_new_id(ClusterType.MAHOUT)
+        else:
+            mc_id = get_default_id(ClusterType.MAHOUT)
+            if not mc_id:
+                logger.error("There is no available cluster. You must create a"
+                             " new one")
+                sys.exit(os.EX_DATAERR)
+
+    logger.info("Using id = " + str(mc_id) + " (MAHOUT)")
+
+    verbose = True
+    if args.quiet:
+        verbose = False
+
+    # Create or load object
+    if args.create:
+
+        if cluster_exists(ClusterType.MAHOUT, mc_id):
+            logger.error("There is a Spark cluster with that id. You must "
+                         "remove it before or chose another id")
+            sys.exit(os.EX_DATAERR)
+
+        # Deserialize HadoopCluster and link it
+        hc_id = args.create[0]
+        hc = deserialize_cluster(ClusterType.HADOOP, hc_id)
+
+        link_to_hadoop_cluster(ClusterType.MAHOUT, mc_id, hc_id)
+
+        props = args.properties[0] if args.properties else None
+
+        mc = MahoutCluster(hc, config_file=props)
+
+    elif args.delete:
+
+        # Clean
+        mc = deserialize_cluster(ClusterType.MAHOUT, mc_id)
+        if mc.initialized:
+            logger.warn("The cluster needs to be cleaned before removed.")
+            mc.clean()
+
+        # Remove hc dump file
+        logger.info("Removing hc dump file from cluster")
+        remove_cluster(ClusterType.MAHOUT, mc_id)
+
+        sys.exit(os.EX_OK)
+    else:
+
+        # Deserialize
+        mc = deserialize_cluster(ClusterType.MAHOUT, mc_id)
+
+    # Execute options
+    if args.bootstrap:
+        mc.bootstrap(args.bootstrap[0])
+
+    if args.initialize:
+        mc.initialize()
+
+    if args.execute:
+        node_host = Host(args.node[0]) if args.node else None
+
+        if node_host:
+            mc.execute(args.execute, node_host, verbose=verbose)
+        else:
+            mc.execute(args.execute, verbose=verbose)
+
+    else:
+        if args.node:
+            logger.warn("--node only applies to --execute")
+
+    if args.clean:
+        mc.clean()
+
+    serialize_cluster(ClusterType.MAHOUT, mc_id, mc)
