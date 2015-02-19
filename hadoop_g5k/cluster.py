@@ -199,7 +199,9 @@ class HadoopCluster(object):
         if not (version.startswith("Hadoop 0.") or
                 version.startswith("Hadoop 1.")):
             logger.error("Version of HadoopCluster is not compliant with the "
-                        "distribution provided in the bootstrap option")
+                        "distribution provided in the bootstrap option. Use "
+                        "the appropiate parameter for --version when creating "
+                        "the cluster or use another distribution.")
             return False
         else:
             return True

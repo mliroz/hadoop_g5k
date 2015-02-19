@@ -93,7 +93,11 @@ if __name__ == "__main__":
                               dest="version",
                               nargs=1,
                               action="store",
-                              help="Hadoop version to be used")
+                              help="Hadoop version to be used. It should be "
+                                   "specified at cluster creation time.\n"
+                                   "If nothing is specified, a cluster "
+                                   "compliant with version 1.x is created.\n"
+                                   "Applies only to --create")
 
     object_group.add_argument("--properties",
                               dest="properties",
