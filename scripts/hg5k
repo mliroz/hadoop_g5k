@@ -261,25 +261,35 @@ if __name__ == "__main__":
         else:
             hc = hadoop_class(hosts)
 
-    elif args.delete:
-
-        # Clean
-        hc = deserialize_cluster(ClusterType.HADOOP, hc_id)
-        if hc.initialized:
-            logger.warn("The cluster needs to be cleaned before removed.")
-            hc.clean()
-
-        # Remove hc dump file
-        logger.info("Removing hc dump file from cluster")
-        remove_cluster(ClusterType.HADOOP, hc_id)
-
-        sys.exit(os.EX_OK)
     else:
-        # Deserialize
-        hc = deserialize_cluster(ClusterType.HADOOP, hc_id)
+        if args.version:
+            logger.warn("--version only applies to cluster creation")
+        if args.properties:
+            logger.warn("--properties only applies to cluster creation")
+
+        if args.delete:
+
+            # Clean
+            hc = deserialize_cluster(ClusterType.HADOOP, hc_id)
+            if hc.initialized:
+                logger.warn("The cluster needs to be cleaned before removed.")
+                hc.clean()
+
+            # Remove hc dump file
+            logger.info("Removing hc dump file from cluster")
+            remove_cluster(ClusterType.HADOOP, hc_id)
+
+            sys.exit(os.EX_OK)
+        else:
+            # Deserialize
+            hc = deserialize_cluster(ClusterType.HADOOP, hc_id)
 
     # Execute options
     if args.bootstrap:
+        f = args.bootstrap[0]
+        if not os.path.exists(f):
+            logger.error("Hadoop distribution file " + f + " does not exist")
+            sys.exit(os.EX_NOINPUT)
         hc.bootstrap(args.bootstrap[0])
 
     if args.initialize:
