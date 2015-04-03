@@ -8,7 +8,7 @@ from abc import abstractmethod
 from ConfigParser import ConfigParser
 from subprocess import call
 
-from execo.action import Put, TaktukPut, Get, Remote
+from execo.action import Put, TaktukPut, Get, Remote, TaktukRemote
 from execo.process import SshProcess
 from execo_engine import logger
 from execo_g5k import get_host_attributes
@@ -27,9 +27,6 @@ DEFAULT_SPARK_LOCAL_CONF_DIR = "spark-conf"
 # Modes
 STANDALONE_MODE = 0
 YARN_MODE = 1
-
-# Other constants
-JAVA_HOME = "/usr/lib/jvm/java-7-openjdk-amd64"
 
 
 class SparkException(Exception):
@@ -230,6 +227,8 @@ class SparkCluster(object):
         "local_base_conf_dir": DEFAULT_SPARK_LOCAL_CONF_DIR
     }
 
+    java_home = "/usr/lib/jvm/java-7-openjdk-amd64"
+
     def __init__(self, mode, config_file=None, hosts=None,
                  hadoop_cluster=None):
         """Create a new Spark cluster. It can be created as a standalone
@@ -302,6 +301,29 @@ class SparkCluster(object):
 
     def bootstrap(self, spark_tar_file):
 
+        # 0. Check that required packages are present
+        required_packages = "openjdk-7-jre openjdk-7-jdk"
+        check_packages = TaktukRemote("dpkg -s " + required_packages,
+                                      self.hosts)
+        for p in check_packages.processes:
+            p.nolog_exit_code = p.nolog_error = True
+        check_packages.run()
+        if not check_packages.ok:
+            logger.info("Packages not installed, trying to install")
+            install_packages = TaktukRemote(
+                "export DEBIAN_MASTER=noninteractive ; " +
+                "apt-get update && apt-get install -y --force-yes " +
+                required_packages, self.hosts).run()
+            if not install_packages.ok:
+                logger.error("Unable to install the packages")
+
+        get_java_home = SshProcess('echo $(readlink -f /usr/bin/javac | '
+                                   'sed "s:/bin/javac::")', self.master)
+        get_java_home.run()
+        self.java_home = get_java_home.stdout.strip()
+
+        logger.info("All required packages are present")
+
         # 1. Remove used dirs if existing
         action = Remote("rm -rf " + self.spark_base_dir, self.hosts)
         action.run()
@@ -332,7 +354,7 @@ class SparkCluster(object):
 
         # 4. Specify environment variables
         command = "cat >> " + self.spark_conf_dir + "/spark-env.sh << EOF\n"
-        command += "JAVA_HOME=" + JAVA_HOME + "\n"
+        command += "JAVA_HOME=" + self.java_home + "\n"
         command += "SPARK_LOG_DIR=" + self.spark_logs_dir + "\n"
         if self.hc:
             command += "HADOOP_CONF_DIR=" + self.hc.hadoop_conf_dir + "\n"

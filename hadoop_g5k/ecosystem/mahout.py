@@ -13,9 +13,6 @@ DEFAULT_MAHOUT_BASE_DIR = "/tmp/mahout"
 DEFAULT_MAHOUT_CONF_DIR = DEFAULT_MAHOUT_BASE_DIR + "/conf"
 DEFAULT_MAHOUT_BIN_DIR = DEFAULT_MAHOUT_BASE_DIR + "/bin"
 
-# Other constants
-JAVA_HOME = "/usr/lib/jvm/java-7-openjdk-amd64"
-
 
 class MahoutCluster(object):
 
@@ -100,7 +97,7 @@ class MahoutCluster(object):
             logger.info("Executing {" + self.mahout_bin_dir + "/mahout " +
                         command + "} in " + str(node))
 
-        proc = SshProcess("export JAVA_HOME='" + JAVA_HOME + "';" +
+        proc = SshProcess("export JAVA_HOME='" + self.hc.java_home + "';" +
                           "export HADOOP_HOME='" + self.hc.hadoop_base_dir + "';" +
                           self.mahout_bin_dir + "/mahout " + command, node)
 

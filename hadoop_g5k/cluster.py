@@ -7,7 +7,7 @@ import tempfile
 
 from ConfigParser import ConfigParser
 
-from execo.action import Put, TaktukPut, Get, Remote
+from execo.action import Put, TaktukPut, Get, Remote, TaktukRemote
 from execo.process import SshProcess
 from execo_engine import logger
 from execo_g5k.api_utils import get_host_attributes, get_host_cluster
@@ -30,10 +30,6 @@ DEFAULT_HADOOP_HDFS_PORT = 54310
 DEFAULT_HADOOP_MR_PORT = 54311
 
 DEFAULT_HADOOP_LOCAL_CONF_DIR = "conf"
-
-# Other constants
-# TODO: is there a way to obtain JAVA_HOME automatically?
-JAVA_HOME = "/usr/lib/jvm/java-7-openjdk-amd64"
 
 
 class HadoopNotInitializedException(HadoopException):
@@ -83,6 +79,9 @@ class HadoopCluster(object):
 
         "local_base_conf_dir": DEFAULT_HADOOP_LOCAL_CONF_DIR
     }
+
+    java_home = "/usr/lib/jvm/java-7-openjdk-amd64"
+
 
     def __init__(self, hosts, topo_list=None, config_file=None):
         """Create a new Hadoop cluster with the given hosts and topology.
@@ -144,6 +143,29 @@ class HadoopCluster(object):
             The file containing Hadoop binaries.
         """
 
+        # 0. Check that required packages are present
+        required_packages = "openjdk-7-jre openjdk-7-jdk"
+        check_packages = TaktukRemote("dpkg -s " + required_packages,
+                                      self.hosts)
+        for p in check_packages.processes:
+            p.nolog_exit_code = p.nolog_error = True
+        check_packages.run()
+        if not check_packages.ok:
+            logger.info("Packages not installed, trying to install")
+            install_packages = TaktukRemote(
+                "export DEBIAN_MASTER=noninteractive ; " +
+                "apt-get update && apt-get install -y --force-yes " +
+                required_packages, self.hosts).run()
+            if not install_packages.ok:
+                logger.error("Unable to install the packages")
+
+        get_java_home = SshProcess('echo $(readlink -f /usr/bin/javac | '
+                                   'sed "s:/bin/javac::")', self.master)
+        get_java_home.run()
+        self.java_home = get_java_home.stdout.strip()
+
+        logger.info("All required packages are present")
+
         # 1. Remove used dirs if existing
         action = Remote("rm -rf " + self.hadoop_base_dir, self.hosts)
         action.run()
@@ -184,7 +206,7 @@ class HadoopCluster(object):
 
         # 4. Specify environment variables
         command = "cat >> " + self.hadoop_conf_dir + "/hadoop-env.sh << EOF\n"
-        command += "export JAVA_HOME=" + JAVA_HOME + "\n"
+        command += "export JAVA_HOME=" + self.java_home + "\n"
         command += "export HADOOP_LOG_DIR=" + self.hadoop_logs_dir + "\n"
         command += "HADOOP_HOME_WARN_SUPPRESS=\"TRUE\"\n"
         command += "EOF"
@@ -840,7 +862,7 @@ class HadoopCluster(object):
           The version used by the Hadoop cluster.
         """
 
-        proc = SshProcess("export JAVA_HOME=" + JAVA_HOME + ";" +
+        proc = SshProcess("export JAVA_HOME=" + self.java_home + ";" +
                           self.hadoop_bin_dir + "/hadoop version",
                           self.master)
         proc.run()
