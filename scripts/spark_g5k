@@ -9,9 +9,11 @@ from execo import Host
 from execo.log import style
 from execo_engine import logger
 
+from hadoop_g5k.cluster import HadoopCluster
 from hadoop_g5k.ecosystem.spark import SparkCluster, STANDALONE_MODE, YARN_MODE, \
     ScalaSparkJob, PythonSparkJob
-from hadoop_g5k.util import generate_hosts, generate_new_id, ClusterType, \
+from hadoop_g5k.util import generate_hosts
+from hadoop_g5k.serialization import generate_new_id, \
     get_default_id, deserialize_cluster, remove_cluster, serialize_cluster, \
     cluster_exists, link_to_hadoop_cluster
 
@@ -196,9 +198,9 @@ if __name__ == "__main__":
         sc_id = int(args.id[0])
     else:
         if args.create:
-            sc_id = generate_new_id(ClusterType.SPARK)
+            sc_id = generate_new_id(SparkCluster.get_cluster_type())
         else:
-            sc_id = get_default_id(ClusterType.SPARK)
+            sc_id = get_default_id(SparkCluster.get_cluster_type())
             if not sc_id:
                 logger.error("There is no available cluster. You must create a"
                              " new one")
@@ -213,7 +215,7 @@ if __name__ == "__main__":
     # Create or load object
     if args.create:
 
-        if cluster_exists(ClusterType.SPARK, sc_id):
+        if cluster_exists(SparkCluster.get_cluster_type(), sc_id):
             logger.error("There is a Spark cluster with that id. You must "
                          "remove it before or chose another id")
             sys.exit(os.EX_DATAERR)
@@ -238,8 +240,9 @@ if __name__ == "__main__":
             hc_id = args.hid[0]
 
             # Deserialize HadoopCluster and link it
-            hc = deserialize_cluster(ClusterType.HADOOP, hc_id)
-            link_to_hadoop_cluster(ClusterType.SPARK, sc_id, hc_id)
+            hc = deserialize_cluster(HadoopCluster.get_cluster_type(), hc_id)
+            link_to_hadoop_cluster(SparkCluster.get_cluster_type(), sc_id,
+                                   hc_id)
         else:
             hc = None
 
@@ -251,20 +254,20 @@ if __name__ == "__main__":
     elif args.delete:
 
         # Clean
-        sc = deserialize_cluster(ClusterType.SPARK, sc_id)
+        sc = deserialize_cluster(SparkCluster.get_cluster_type(), sc_id)
         if sc.initialized:
             logger.warn("The cluster needs to be cleaned before removed.")
             sc.clean()
 
         # Remove hc dump file
         logger.info("Removing hc dump file from cluster")
-        remove_cluster(ClusterType.SPARK, sc_id)
+        remove_cluster(SparkCluster.get_cluster_type(), sc_id)
 
         sys.exit(os.EX_OK)
     else:
 
         # Deserialize
-        sc = deserialize_cluster(ClusterType.SPARK, sc_id)
+        sc = deserialize_cluster(SparkCluster.get_cluster_type(), sc_id)
 
     # Execute options
     if args.bootstrap:
@@ -326,4 +329,4 @@ if __name__ == "__main__":
     if args.clean:
         sc.clean()
 
-    serialize_cluster(ClusterType.SPARK, sc_id, sc)
+    serialize_cluster(SparkCluster.get_cluster_type(), sc_id, sc)

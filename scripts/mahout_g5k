@@ -8,9 +8,10 @@ from execo import Host
 
 from execo.log import style
 from execo_engine import logger
-from hadoop_g5k.ecosystem.mahout import MahoutCluster
 
-from hadoop_g5k.util import generate_new_id, ClusterType, \
+from hadoop_g5k.cluster import HadoopCluster
+from hadoop_g5k.ecosystem.mahout import MahoutCluster
+from hadoop_g5k.serialization import generate_new_id, \
     get_default_id, deserialize_cluster, remove_cluster, serialize_cluster, \
     cluster_exists, link_to_hadoop_cluster
 
@@ -125,9 +126,9 @@ if __name__ == "__main__":
         mc_id = int(args.id[0])
     else:
         if args.create:
-            mc_id = generate_new_id(ClusterType.MAHOUT)
+            mc_id = generate_new_id(MahoutCluster.get_cluster_type())
         else:
-            mc_id = get_default_id(ClusterType.MAHOUT)
+            mc_id = get_default_id(MahoutCluster.get_cluster_type())
             if not mc_id:
                 logger.error("There is no available cluster. You must create a"
                              " new one")
@@ -142,16 +143,16 @@ if __name__ == "__main__":
     # Create or load object
     if args.create:
 
-        if cluster_exists(ClusterType.MAHOUT, mc_id):
+        if cluster_exists(MahoutCluster.get_cluster_type(), mc_id):
             logger.error("There is a Spark cluster with that id. You must "
                          "remove it before or chose another id")
             sys.exit(os.EX_DATAERR)
 
         # Deserialize HadoopCluster and link it
         hc_id = args.create[0]
-        hc = deserialize_cluster(ClusterType.HADOOP, hc_id)
+        hc = deserialize_cluster(HadoopCluster.get_cluster_type(), hc_id)
 
-        link_to_hadoop_cluster(ClusterType.MAHOUT, mc_id, hc_id)
+        link_to_hadoop_cluster(MahoutCluster.get_cluster_type(), mc_id, hc_id)
 
         props = args.properties[0] if args.properties else None
 
@@ -160,20 +161,20 @@ if __name__ == "__main__":
     elif args.delete:
 
         # Clean
-        mc = deserialize_cluster(ClusterType.MAHOUT, mc_id)
+        mc = deserialize_cluster(MahoutCluster.get_cluster_type(), mc_id)
         if mc.initialized:
             logger.warn("The cluster needs to be cleaned before removed.")
             mc.clean()
 
         # Remove hc dump file
         logger.info("Removing hc dump file from cluster")
-        remove_cluster(ClusterType.MAHOUT, mc_id)
+        remove_cluster(MahoutCluster.get_cluster_type(), mc_id)
 
         sys.exit(os.EX_OK)
     else:
 
         # Deserialize
-        mc = deserialize_cluster(ClusterType.MAHOUT, mc_id)
+        mc = deserialize_cluster(MahoutCluster.get_cluster_type(), mc_id)
 
     # Execute options
     if args.bootstrap:
@@ -197,4 +198,4 @@ if __name__ == "__main__":
     if args.clean:
         mc.clean()
 
-    serialize_cluster(ClusterType.MAHOUT, mc_id, mc)
+    serialize_cluster(MahoutCluster.get_cluster_type(), mc_id, mc)

@@ -62,6 +62,10 @@ class HadoopCluster(object):
         True if the JobTracker is running, False otherwise.
     """
 
+    @staticmethod
+    def get_cluster_type():
+        return "hadoop"
+
     # Cluster state
     initialized = False
     running = False
@@ -79,9 +83,6 @@ class HadoopCluster(object):
 
         "local_base_conf_dir": DEFAULT_HADOOP_LOCAL_CONF_DIR
     }
-
-    java_home = "/usr/lib/jvm/java-7-openjdk-amd64"
-
 
     def __init__(self, hosts, topo_list=None, config_file=None):
         """Create a new Hadoop cluster with the given hosts and topology.
@@ -104,16 +105,16 @@ class HadoopCluster(object):
         if config_file:
             config.readfp(open(config_file))
 
-        self.hadoop_base_dir = config.get("cluster", "hadoop_base_dir")
-        self.hadoop_conf_dir = config.get("cluster", "hadoop_conf_dir")
-        self.hadoop_logs_dir = config.get("cluster", "hadoop_logs_dir")
+        self.base_dir = config.get("cluster", "hadoop_base_dir")
+        self.conf_dir = config.get("cluster", "hadoop_conf_dir")
+        self.logs_dir = config.get("cluster", "hadoop_logs_dir")
         self.hadoop_temp_dir = config.get("cluster", "hadoop_temp_dir")
         self.hdfs_port = config.getint("cluster", "hdfs_port")
         self.mapred_port = config.getint("cluster", "mapred_port")
         self.local_base_conf_dir = config.get("local", "local_base_conf_dir")
 
-        self.hadoop_bin_dir = self.hadoop_base_dir + "/bin"
-        self.hadoop_sbin_dir = self.hadoop_base_dir + "/bin"
+        self.bin_dir = self.base_dir + "/bin"
+        self.sbin_dir = self.base_dir + "/bin"
 
         # Configure master and slaves
         self.hosts = hosts
@@ -135,11 +136,11 @@ class HadoopCluster(object):
                     ", hosts " + str(self.hosts) + " and topology " +
                     str(self.topology))
 
-    def bootstrap(self, hadoop_tar_file):
+    def bootstrap(self, tar_file):
         """Install Hadoop in all cluster nodes from the specified tar.gz file.
         
         Args:
-          hadoop_tar_file (str):
+          tar_file (str):
             The file containing Hadoop binaries.
         """
 
@@ -167,21 +168,21 @@ class HadoopCluster(object):
         logger.info("All required packages are present")
 
         # 1. Remove used dirs if existing
-        action = Remote("rm -rf " + self.hadoop_base_dir, self.hosts)
+        action = Remote("rm -rf " + self.base_dir, self.hosts)
         action.run()
-        action = Remote("rm -rf " + self.hadoop_conf_dir, self.hosts)
+        action = Remote("rm -rf " + self.conf_dir, self.hosts)
         action.run()
-        action = Remote("rm -rf " + self.hadoop_logs_dir, self.hosts)
+        action = Remote("rm -rf " + self.logs_dir, self.hosts)
         action.run()
         action = Remote("rm -rf " + self.hadoop_temp_dir, self.hosts)
         action.run()
 
         # 1. Copy hadoop tar file and uncompress
-        logger.info("Copy " + hadoop_tar_file + " to hosts and uncompress")
-        action = TaktukPut(self.hosts, [hadoop_tar_file], "/tmp")
+        logger.info("Copy " + tar_file + " to hosts and uncompress")
+        action = TaktukPut(self.hosts, [tar_file], "/tmp")
         action.run()
         action = Remote(
-            "tar xf /tmp/" + os.path.basename(hadoop_tar_file) + " -C /tmp",
+            "tar xf /tmp/" + os.path.basename(tar_file) + " -C /tmp",
             self.hosts)
         action.run()
 
@@ -189,25 +190,25 @@ class HadoopCluster(object):
         logger.info("Create installation directories")
         action = Remote(
             "mv /tmp/" +
-            os.path.basename(hadoop_tar_file).replace(".tar.gz", "") + " " +
-            self.hadoop_base_dir,
+            os.path.basename(tar_file).replace(".tar.gz", "") + " " +
+            self.base_dir,
             self.hosts)
         action.run()
 
         # 3 Create other dirs        
-        action = Remote("mkdir -p " + self.hadoop_conf_dir, self.hosts)
+        action = Remote("mkdir -p " + self.conf_dir, self.hosts)
         action.run()
 
-        action = Remote("mkdir -p " + self.hadoop_logs_dir, self.hosts)
+        action = Remote("mkdir -p " + self.logs_dir, self.hosts)
         action.run()
 
         action = Remote("mkdir -p " + self.hadoop_temp_dir, self.hosts)
         action.run()
 
         # 4. Specify environment variables
-        command = "cat >> " + self.hadoop_conf_dir + "/hadoop-env.sh << EOF\n"
+        command = "cat >> " + self.conf_dir + "/hadoop-env.sh << EOF\n"
         command += "export JAVA_HOME=" + self.java_home + "\n"
-        command += "export HADOOP_LOG_DIR=" + self.hadoop_logs_dir + "\n"
+        command += "export HADOOP_LOG_DIR=" + self.logs_dir + "\n"
         command += "HADOOP_HOME_WARN_SUPPRESS=\"TRUE\"\n"
         command += "EOF"
         action = Remote(command, self.hosts)
@@ -238,13 +239,13 @@ class HadoopCluster(object):
         # Set basic configuration
         self._copy_base_conf()
         self._create_master_and_slave_conf()
-        self.topology.create_files(self.conf_dir)
+        self.topology.create_files(self.temp_conf_dir)
 
         # Configure hosts depending on resource type
         for g5k_cluster in self.host_clusters:
             hosts = self.host_clusters[g5k_cluster]
             self._configure_servers(hosts)
-            self._copy_conf(self.conf_dir, hosts)
+            self._copy_conf(self.temp_conf_dir, hosts)
 
         # Format HDFS
         self.format_dfs()
@@ -266,12 +267,12 @@ class HadoopCluster(object):
     def _copy_base_conf(self):
         """Copy base configuration files to tmp dir."""
 
-        self.conf_dir = tempfile.mkdtemp("", "hadoop-", "/tmp")
+        self.temp_conf_dir = tempfile.mkdtemp("", "hadoop-", "/tmp")
         if os.path.exists(self.local_base_conf_dir):
             base_conf_files = [os.path.join(self.local_base_conf_dir, f)
                                for f in os.listdir(self.local_base_conf_dir)]
             for f in base_conf_files:
-                shutil.copy(f, self.conf_dir)
+                shutil.copy(f, self.temp_conf_dir)
         else:
             logger.warn(
                 "Local conf dir does not exist. Using default configuration")
@@ -288,20 +289,20 @@ class HadoopCluster(object):
         logger.info("Copying missing conf files from master: " + str(
             missing_conf_files))
 
-        remote_missing_files = [os.path.join(self.hadoop_conf_dir, f)
+        remote_missing_files = [os.path.join(self.conf_dir, f)
                                 for f in missing_conf_files]
 
-        action = Get([self.master], remote_missing_files, self.conf_dir)
+        action = Get([self.master], remote_missing_files, self.temp_conf_dir)
         action.run()
 
     def _create_master_and_slave_conf(self):
         """Create master and slaves configuration files."""
 
-        master_file = open(self.conf_dir + "/masters", "w")
+        master_file = open(self.temp_conf_dir + "/masters", "w")
         master_file.write(self.master.address + "\n")
         master_file.close()
 
-        slaves_file = open(self.conf_dir + "/slaves", "w")
+        slaves_file = open(self.temp_conf_dir + "/slaves", "w")
         for s in self.hosts:
             slaves_file.write(s.address + "\n")
         slaves_file.close()
@@ -339,29 +340,29 @@ class HadoopCluster(object):
                            (1024 * 1024)) - 2 * 1024
         mem_per_slot_mb = total_memory_mb / (num_cores - 1)
 
-        replace_in_xml_file(os.path.join(self.conf_dir, CORE_CONF_FILE),
+        replace_in_xml_file(os.path.join(self.temp_conf_dir, CORE_CONF_FILE),
                             "fs.default.name",
                             "hdfs://" + self.master.address + ":" +
                                         str(self.hdfs_port) + "/",
                             True)
-        replace_in_xml_file(os.path.join(self.conf_dir, CORE_CONF_FILE),
+        replace_in_xml_file(os.path.join(self.temp_conf_dir, CORE_CONF_FILE),
                             "hadoop.tmp.dir",
                             self.hadoop_temp_dir, True)
-        replace_in_xml_file(os.path.join(self.conf_dir, CORE_CONF_FILE),
+        replace_in_xml_file(os.path.join(self.temp_conf_dir, CORE_CONF_FILE),
                             "topology.script.file.name",
-                            self.hadoop_conf_dir + "/topo.sh", True)
+                            self.conf_dir + "/topo.sh", True)
 
-        replace_in_xml_file(os.path.join(self.conf_dir, MR_CONF_FILE),
+        replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
                             "mapred.job.tracker",
                             self.master.address + ":" +
                             str(self.mapred_port), True)
-        replace_in_xml_file(os.path.join(self.conf_dir, MR_CONF_FILE),
+        replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
                             "mapred.tasktracker.map.tasks.maximum",
                             str(num_cores - 1), True)
-        replace_in_xml_file(os.path.join(self.conf_dir, MR_CONF_FILE),
+        replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
                             "mapred.tasktracker.reduce.tasks.maximum",
                             str(num_cores - 1), True)
-        replace_in_xml_file(os.path.join(self.conf_dir, MR_CONF_FILE),
+        replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
                             "mapred.child.java.opts",
                             "-Xmx" + str(mem_per_slot_mb) + "m", True)
 
@@ -382,7 +383,7 @@ class HadoopCluster(object):
 
         conf_files = [os.path.join(conf_dir, f) for f in os.listdir(conf_dir)]
 
-        action = TaktukPut(hosts, conf_files, self.hadoop_conf_dir)
+        action = TaktukPut(hosts, conf_files, self.conf_dir)
         action.run()
 
         if not action.finished_ok:
@@ -405,13 +406,13 @@ class HadoopCluster(object):
             hosts = self.host_clusters[g5k_cluster]
 
             # Copy conf files from first host in the cluster
-            action = Remote("ls " + self.hadoop_conf_dir + "/*.xml", [hosts[0]])
+            action = Remote("ls " + self.conf_dir + "/*.xml", [hosts[0]])
             action.run()
             output = action.processes[0].stdout
 
             remote_conf_files = []
             for f in output.split():
-                remote_conf_files.append(os.path.join(self.hadoop_conf_dir, f))
+                remote_conf_files.append(os.path.join(self.conf_dir, f))
 
             tmp_dir = "/tmp/mliroz_temp_hadoop/"
             if not os.path.exists(tmp_dir):
@@ -441,7 +442,7 @@ class HadoopCluster(object):
 
         logger.info("Formatting HDFS")
 
-        proc = SshProcess(self.hadoop_bin_dir + "/hadoop namenode -format",
+        proc = SshProcess(self.bin_dir + "/hadoop namenode -format",
                           self.master)
         proc.run()
 
@@ -483,8 +484,7 @@ class HadoopCluster(object):
             logger.warn("Dfs was already started")
             return
 
-        proc = SshProcess(self.hadoop_sbin_dir + "/start-dfs.sh",
-                          self.master)
+        proc = SshProcess(self.sbin_dir + "/start-dfs.sh", self.master)
         proc.run()
 
         if not proc.finished_ok:
@@ -500,9 +500,8 @@ class HadoopCluster(object):
         self.start_dfs()
 
         logger.info("Waiting for safe mode to be off")
-        proc = SshProcess(
-            self.hadoop_bin_dir + "/hadoop dfsadmin -safemode wait",
-            self.master)
+        proc = SshProcess(self.bin_dir + "/hadoop dfsadmin -safemode wait",
+                          self.master)
         proc.run()
 
         if not proc.finished_ok:
@@ -521,8 +520,7 @@ class HadoopCluster(object):
             logger.warn("Error while starting MapReduce")
             return
 
-        proc = SshProcess(self.hadoop_sbin_dir + "/start-mapred.sh",
-                          self.master)
+        proc = SshProcess(self.sbin_dir + "/start-mapred.sh", self.master)
         proc.run()
 
         if not proc.finished_ok:
@@ -564,8 +562,7 @@ class HadoopCluster(object):
 
         logger.info("Stopping HDFS")
 
-        proc = SshProcess(self.hadoop_sbin_dir + "/stop-dfs.sh",
-                          self.master)
+        proc = SshProcess(self.sbin_dir + "/stop-dfs.sh", self.master)
         proc.run()
 
         if not proc.finished_ok:
@@ -580,8 +577,7 @@ class HadoopCluster(object):
 
         logger.info("Stopping MapReduce")
 
-        proc = SshProcess(self.hadoop_sbin_dir + "/stop-mapred.sh",
-                          self.master)
+        proc = SshProcess(self.sbin_dir + "/stop-mapred.sh", self.master)
         proc.run()
 
         if not proc.finished_ok:
@@ -620,10 +616,10 @@ class HadoopCluster(object):
             node = self.master
 
         if verbose:
-            logger.info("Executing {" + self.hadoop_bin_dir + "/hadoop " +
+            logger.info("Executing {" + self.bin_dir + "/hadoop " +
                         command + "} in " + str(node))
 
-        proc = SshProcess(self.hadoop_bin_dir + "/hadoop " + command, node)
+        proc = SshProcess(self.bin_dir + "/hadoop " + command, node)
 
         if verbose:
             red_color = '\033[01;31m'
@@ -674,10 +670,10 @@ class HadoopCluster(object):
         command = job.get_command(exec_dir)
 
         # Execute
-        logger.info("Executing jar job. Command = {" + self.hadoop_bin_dir +
+        logger.info("Executing jar job. Command = {" + self.bin_dir +
                     "/hadoop " + command + "} in " + str(node))
 
-        proc = SshProcess(self.hadoop_bin_dir + "/hadoop " + command, node)
+        proc = SshProcess(self.bin_dir + "/hadoop " + command, node)
 
         if verbose:
             red_color = '\033[01;31m'
@@ -723,7 +719,7 @@ class HadoopCluster(object):
                            " does not exist. It will be created")
             os.makedirs(dest)
 
-        history_dir = os.path.join(self.hadoop_logs_dir, "history")
+        history_dir = os.path.join(self.logs_dir, "history")
         if job_ids:
             pattern = " -o ".join("-name " + jid + "*" for jid in job_ids)
             list_dirs = SshProcess("find " + history_dir + " " + pattern,
@@ -752,7 +748,7 @@ class HadoopCluster(object):
             self.stop()
             restart = True
 
-        action = Remote("rm -rf " + self.hadoop_logs_dir + "/history",
+        action = Remote("rm -rf " + self.logs_dir + "/history",
                         [self.master])
         action.run()
 
@@ -762,7 +758,7 @@ class HadoopCluster(object):
     def clean_conf(self):
         """Clean configuration files used by this cluster."""
 
-        shutil.rmtree(self.conf_dir)
+        shutil.rmtree(self.temp_conf_dir)
 
     def clean_logs(self):
         """Remove all Hadoop logs."""
@@ -775,7 +771,7 @@ class HadoopCluster(object):
             self.stop()
             restart = True
 
-        action = Remote("rm -rf " + self.hadoop_logs_dir + "/*", self.hosts)
+        action = Remote("rm -rf " + self.logs_dir + "/*", self.hosts)
         action.run()
 
         if restart:
@@ -863,7 +859,7 @@ class HadoopCluster(object):
         """
 
         proc = SshProcess("export JAVA_HOME=" + self.java_home + ";" +
-                          self.hadoop_bin_dir + "/hadoop version",
+                          self.bin_dir + "/hadoop version",
                           self.master)
         proc.run()
         version = proc.stdout.splitlines()[0]

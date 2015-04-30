@@ -68,17 +68,17 @@ class HadoopV2Cluster(HadoopCluster):
         
         super(HadoopV2Cluster, self).__init__(hosts, topo_list, config_file)
         
-        self.hadoop_sbin_dir = self.hadoop_base_dir + "/sbin"
+        self.sbin_dir = self.base_dir + "/sbin"
 
     def _copy_base_conf(self):
         """Copy base configuration files to tmp dir."""
 
-        self.conf_dir = tempfile.mkdtemp("", "hadoop-", "/tmp")
+        self.temp_conf_dir = tempfile.mkdtemp("", "hadoop-", "/tmp")
         if os.path.exists(self.local_base_conf_dir):
             base_conf_files = [os.path.join(self.local_base_conf_dir, f)
                                for f in os.listdir(self.local_base_conf_dir)]
             for f in base_conf_files:
-                shutil.copy(f, self.conf_dir)
+                shutil.copy(f, self.temp_conf_dir)
         else:
             logger.warn(
                 "Local conf dir does not exist. Using default configuration")
@@ -96,10 +96,10 @@ class HadoopV2Cluster(HadoopCluster):
         logger.info("Copying missing conf files from master: " + str(
             missing_conf_files))
 
-        remote_missing_files = [os.path.join(self.hadoop_conf_dir, f)
+        remote_missing_files = [os.path.join(self.conf_dir, f)
                                 for f in missing_conf_files]
 
-        action = Get([self.master], remote_missing_files, self.conf_dir)
+        action = Get([self.master], remote_missing_files, self.temp_conf_dir)
         action.run()
 
     def _configure_servers(self, hosts=None):
@@ -123,55 +123,55 @@ class HadoopV2Cluster(HadoopCluster):
                               int(0.75 * available_memory))
         mem_per_task_mb = total_memory_mb / (num_cores - 1)
 
-        replace_in_xml_file(os.path.join(self.conf_dir, CORE_CONF_FILE),
+        replace_in_xml_file(os.path.join(self.temp_conf_dir, CORE_CONF_FILE),
                             "fs.defaultFS",
                             "hdfs://" + self.master.address + ":" +
                                         str(self.hdfs_port) + "/",
                             True)
-        replace_in_xml_file(os.path.join(self.conf_dir, CORE_CONF_FILE),
+        replace_in_xml_file(os.path.join(self.temp_conf_dir, CORE_CONF_FILE),
                             "hadoop.tmp.dir",
                             self.hadoop_temp_dir, True)
-        replace_in_xml_file(os.path.join(self.conf_dir, CORE_CONF_FILE),
+        replace_in_xml_file(os.path.join(self.temp_conf_dir, CORE_CONF_FILE),
                             "topology.script.file.name",
-                            self.hadoop_conf_dir + "/topo.sh", True)
+                            self.conf_dir + "/topo.sh", True)
 
-        replace_in_xml_file(os.path.join(self.conf_dir, MR_CONF_FILE),
+        replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
                             "mapreduce.framework.name", "yarn", True)
-        replace_in_xml_file(os.path.join(self.conf_dir, MR_CONF_FILE),
+        replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
                             "mapreduce.map.memory.mb",
                             str(mem_per_task_mb), True)
-        replace_in_xml_file(os.path.join(self.conf_dir, MR_CONF_FILE),
+        replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
                             "mapreduce.map.java.opts",
                             "-Xmx" + str(mem_per_task_mb) + "m", True)
-        replace_in_xml_file(os.path.join(self.conf_dir, MR_CONF_FILE),
+        replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
                             "mapreduce.map.cpu.vcores", "1", True)
-        replace_in_xml_file(os.path.join(self.conf_dir, MR_CONF_FILE),
+        replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
                             "mapreduce.reduce.memory.mb",
                             str(mem_per_task_mb), True)
-        replace_in_xml_file(os.path.join(self.conf_dir, MR_CONF_FILE),
+        replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
                             "mapreduce.reduce.cpu.vcores", "1", True)
-        replace_in_xml_file(os.path.join(self.conf_dir, MR_CONF_FILE),
+        replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
                             "mapreduce.reduce.java.opts",
                             "-Xmx" + str(mem_per_task_mb) + "m", True)
 
-        replace_in_xml_file(os.path.join(self.conf_dir, YARN_CONF_FILE),
+        replace_in_xml_file(os.path.join(self.temp_conf_dir, YARN_CONF_FILE),
                             "yarn.resourcemanager.address",
                             self.master.address + ":" +
                             str(self.mapred_port), True)
-        replace_in_xml_file(os.path.join(self.conf_dir, YARN_CONF_FILE),
+        replace_in_xml_file(os.path.join(self.temp_conf_dir, YARN_CONF_FILE),
                             "yarn.nodemanager.resource.memory-mb",
                             str(total_memory_mb), True)
-        replace_in_xml_file(os.path.join(self.conf_dir, YARN_CONF_FILE),
+        replace_in_xml_file(os.path.join(self.temp_conf_dir, YARN_CONF_FILE),
                             "yarn.nodemanager.resource.cpu-vcores",
                             str(num_cores - 1), True)
-        replace_in_xml_file(os.path.join(self.conf_dir, YARN_CONF_FILE),
+        replace_in_xml_file(os.path.join(self.temp_conf_dir, YARN_CONF_FILE),
                             "yarn.scheduler.maximum-allocation-mb",
                             str(total_memory_mb), True)
-        replace_in_xml_file(os.path.join(self.conf_dir, YARN_CONF_FILE),
+        replace_in_xml_file(os.path.join(self.temp_conf_dir, YARN_CONF_FILE),
                             "yarn.nodemanager.aux-services",
                             "mapreduce_shuffle", True)
 
-    def bootstrap(self, hadoop_tar_file):
+    def bootstrap(self, tar_file):
         """Install Hadoop in all cluster nodes from the specified tar.gz file.
 
         Args:
@@ -179,10 +179,10 @@ class HadoopV2Cluster(HadoopCluster):
             The file containing Hadoop binaries.
         """
 
-        if super(HadoopV2Cluster, self).bootstrap(hadoop_tar_file):
-            action = Remote("cp " + os.path.join(self.hadoop_conf_dir,
+        if super(HadoopV2Cluster, self).bootstrap(tar_file):
+            action = Remote("cp " + os.path.join(self.conf_dir,
                                                  MR_CONF_FILE + ".template ") +
-                            os.path.join(self.hadoop_conf_dir, MR_CONF_FILE),
+                            os.path.join(self.conf_dir, MR_CONF_FILE),
                             self.hosts)
             action.run()
 
@@ -226,8 +226,7 @@ class HadoopV2Cluster(HadoopCluster):
         
         self._check_initialization()
         
-        proc = SshProcess(self.hadoop_sbin_dir + "/start-yarn.sh",
-                          self.master)
+        proc = SshProcess(self.sbin_dir + "/start-yarn.sh", self.master)
         proc.run()        
         
         if not proc.finished_ok:
@@ -265,8 +264,7 @@ class HadoopV2Cluster(HadoopCluster):
 
         logger.info("Stopping YARN")
 
-        proc = SshProcess(self.hadoop_sbin_dir + "/stop-yarn.sh",
-                          self.master)
+        proc = SshProcess(self.sbin_dir + "/stop-yarn.sh", self.master)
         proc.run()
         
         if not proc.finished_ok:
@@ -333,7 +331,7 @@ class HadoopV2Cluster(HadoopCluster):
             restop = True
 
         user_login = getpass.getuser()
-        hist_dfs_dir = "/tmp/hadoop-yarn/staging/history/done_intermediate/" + \
+        hist_dfs_dir = "/tmp/hadoop-yarn/staging/history/done_intermediate/" +\
                        user_login
         self.execute("fs -rm -R " + hist_dfs_dir, verbose=False)
 

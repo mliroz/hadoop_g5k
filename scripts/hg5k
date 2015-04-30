@@ -15,10 +15,10 @@ from execo_engine import logger
 from hadoop_g5k.cluster import HadoopCluster
 from hadoop_g5k.cluster_v2 import HadoopV2Cluster
 from hadoop_g5k.objects import HadoopJarJob
-from hadoop_g5k.util import generate_hosts, generate_new_id, ClusterType, \
+from hadoop_g5k.util import generate_hosts
+from hadoop_g5k.serialization import generate_new_id, \
     get_default_id, cluster_exists, deserialize_cluster, remove_cluster, \
     serialize_cluster
-
 
 if __name__ == "__main__":
 
@@ -211,9 +211,9 @@ if __name__ == "__main__":
         hc_id = int(args.id[0])
     else:
         if args.create:
-            hc_id = generate_new_id(ClusterType.HADOOP)
+            hc_id = generate_new_id(HadoopCluster.get_cluster_type())
         else:
-            hc_id = get_default_id(ClusterType.HADOOP)
+            hc_id = get_default_id(HadoopCluster.get_cluster_type())
             if not hc_id:
                 logger.error("There is no available cluster. You must create a"
                              " new one")
@@ -236,7 +236,7 @@ if __name__ == "__main__":
     # Create or load object
     if args.create:
 
-        if cluster_exists(ClusterType.HADOOP, hc_id):
+        if cluster_exists(HadoopCluster.get_cluster_type(), hc_id):
             logger.error("There is a hadoop cluster with that id. You must "
                          "remove it before or chose another id")
             sys.exit(os.EX_DATAERR)
@@ -270,19 +270,19 @@ if __name__ == "__main__":
         if args.delete:
 
             # Clean
-            hc = deserialize_cluster(ClusterType.HADOOP, hc_id)
+            hc = deserialize_cluster(HadoopCluster.get_cluster_type(), hc_id)
             if hc.initialized:
                 logger.warn("The cluster needs to be cleaned before removed.")
                 hc.clean()
 
             # Remove hc dump file
             logger.info("Removing hc dump file from cluster")
-            remove_cluster(ClusterType.HADOOP, hc_id)
+            remove_cluster(HadoopCluster.get_cluster_type(), hc_id)
 
             sys.exit(os.EX_OK)
         else:
             # Deserialize
-            hc = deserialize_cluster(ClusterType.HADOOP, hc_id)
+            hc = deserialize_cluster(HadoopCluster.get_cluster_type(), hc_id)
 
     # Execute options
     if args.bootstrap:
@@ -494,4 +494,4 @@ if __name__ == "__main__":
             print stdout
             print ""
 
-    serialize_cluster(ClusterType.HADOOP, hc_id, hc)
+    serialize_cluster(HadoopCluster.get_cluster_type(), hc_id, hc)

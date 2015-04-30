@@ -204,7 +204,7 @@ class SparkCluster(object):
         List of hosts composing the cluster.
       initialized (bool):
         True if the cluster has been initialized, False otherwise.
-      running_spark (bool):
+      running (bool):
         True if spark is running, False otherwise.
       mode (int):
         The cluster manager that is used (STANDALONE_MODE or YARN_MODE).
@@ -212,9 +212,13 @@ class SparkCluster(object):
         A reference to the Hadoop cluster if spark is deployed on top of one.
     """
 
+    @staticmethod
+    def get_cluster_type():
+        return "spark"
+
     # Cluster state
     initialized = False
-    running_spark = False
+    running = False
 
     # Default properties
     defaults = {
@@ -226,8 +230,6 @@ class SparkCluster(object):
 
         "local_base_conf_dir": DEFAULT_SPARK_LOCAL_CONF_DIR
     }
-
-    java_home = "/usr/lib/jvm/java-7-openjdk-amd64"
 
     def __init__(self, mode, config_file=None, hosts=None,
                  hadoop_cluster=None):
@@ -253,16 +255,16 @@ class SparkCluster(object):
         if config_file:
             config.readfp(open(config_file))
 
-        self.spark_base_dir = config.get("cluster", "spark_base_dir")
-        self.spark_conf_dir = config.get("cluster", "spark_conf_dir")
-        self.spark_logs_dir = config.get("cluster", "spark_logs_dir")
-        self.spark_event_log_dir = self.spark_logs_dir + "/events"
-        self.spark_work_dir = config.get("cluster", "spark_work_dir")
-        self.spark_port = config.getint("cluster", "spark_port")
+        self.base_dir = config.get("cluster", "spark_base_dir")
+        self.conf_dir = config.get("cluster", "spark_conf_dir")
+        self.logs_dir = config.get("cluster", "spark_logs_dir")
+        self.event_log_dir = self.logs_dir + "/events"
+        self.work_dir = config.get("cluster", "spark_work_dir")
+        self.port = config.getint("cluster", "spark_port")
         self.local_base_conf_dir = config.get("local", "local_base_conf_dir")
 
-        self.spark_bin_dir = self.spark_base_dir + "/bin"
-        self.spark_sbin_dir = self.spark_base_dir + "/sbin"
+        self.bin_dir = self.base_dir + "/bin"
+        self.sbin_dir = self.base_dir + "/sbin"
 
         self.mode = mode
 
@@ -299,7 +301,7 @@ class SparkCluster(object):
                     str(self.hosts) + "." +
                     " It is linked to a Hadoop cluster." if self.hc else "")
 
-    def bootstrap(self, spark_tar_file):
+    def bootstrap(self, tar_file):
 
         # 0. Check that required packages are present
         required_packages = "openjdk-7-jre openjdk-7-jdk"
@@ -325,43 +327,42 @@ class SparkCluster(object):
         logger.info("All required packages are present")
 
         # 1. Remove used dirs if existing
-        action = Remote("rm -rf " + self.spark_base_dir, self.hosts)
+        action = Remote("rm -rf " + self.base_dir, self.hosts)
         action.run()
-        action = Remote("rm -rf " + self.spark_conf_dir, self.hosts)
+        action = Remote("rm -rf " + self.conf_dir, self.hosts)
         action.run()
 
         # 1. Copy Spark tar file and uncompress
-        logger.info("Copy " + spark_tar_file + " to hosts and uncompress")
-        action = Put(self.hosts, [spark_tar_file], "/tmp")
+        logger.info("Copy " + tar_file + " to hosts and uncompress")
+        action = Put(self.hosts, [tar_file], "/tmp")
         action.run()
         action = Remote(
-            "tar xf /tmp/" + os.path.basename(spark_tar_file) + " -C /tmp",
+            "tar xf /tmp/" + os.path.basename(tar_file) + " -C /tmp",
             self.hosts)
         action.run()
 
         # 2. Move installation to base dir
         logger.info("Create installation directories")
         action = Remote(
-            "mv /tmp/" +
-            os.path.basename(spark_tar_file).replace(".tgz", "") + " " +
-            self.spark_base_dir,
+            "mv /tmp/" + os.path.basename(tar_file).replace(".tgz", "") + " " +
+            self.base_dir,
             self.hosts)
         action.run()
 
         # 3. Create other dirs
-        action = Remote("mkdir -p " + self.spark_conf_dir, self.hosts)
+        action = Remote("mkdir -p " + self.conf_dir, self.hosts)
         action.run()
 
         # 4. Specify environment variables
-        command = "cat >> " + self.spark_conf_dir + "/spark-env.sh << EOF\n"
+        command = "cat >> " + self.conf_dir + "/spark-env.sh << EOF\n"
         command += "JAVA_HOME=" + self.java_home + "\n"
-        command += "SPARK_LOG_DIR=" + self.spark_logs_dir + "\n"
+        command += "SPARK_LOG_DIR=" + self.logs_dir + "\n"
         if self.hc:
-            command += "HADOOP_CONF_DIR=" + self.hc.hadoop_conf_dir + "\n"
+            command += "HADOOP_CONF_DIR=" + self.hc.conf_dir + "\n"
         if self.mode == YARN_MODE:
-            command += "YARN_CONF_DIR=" + self.hc.hadoop_conf_dir + "\n"
+            command += "YARN_CONF_DIR=" + self.hc.conf_dir + "\n"
         command += "EOF\n"
-        command += "chmod +x " + self.spark_conf_dir + "/spark-env.sh"
+        command += "chmod +x " + self.conf_dir + "/spark-env.sh"
         action = Remote(command, self.hosts)
         action.run()
 
@@ -377,7 +378,7 @@ class SparkCluster(object):
         self._create_master_and_slave_conf()
         self._configure_servers(self.hosts)
 
-        self._copy_conf(self.conf_dir, self.hosts)
+        self._copy_conf(self.temp_conf_dir, self.hosts)
 
         self.initialized = True
 
@@ -385,7 +386,7 @@ class SparkCluster(object):
         """Clean previous configurations"""
 
         if self.initialized:
-            if self.running_spark:
+            if self.running:
                 self.stop()
             self.clean()
         else:
@@ -396,12 +397,12 @@ class SparkCluster(object):
     def _copy_base_conf(self):
         """Copy base configuration files to tmp dir."""
 
-        self.conf_dir = tempfile.mkdtemp("", "spark-", "/tmp")
+        self.temp_conf_dir = tempfile.mkdtemp("", "spark-", "/tmp")
         if os.path.exists(self.local_base_conf_dir):
             base_conf_files = [os.path.join(self.local_base_conf_dir, f)
                                for f in os.listdir(self.local_base_conf_dir)]
             for f in base_conf_files:
-                shutil.copy(f, self.conf_dir)
+                shutil.copy(f, self.temp_conf_dir)
         else:
             logger.warn(
                 "Local conf dir does not exist. Using default configuration")
@@ -418,24 +419,25 @@ class SparkCluster(object):
         logger.info("Copying missing conf files from master: " + str(
             missing_conf_files))
 
-        remote_missing_files = [os.path.join(self.spark_conf_dir, f)
+        remote_missing_files = [os.path.join(self.conf_dir, f)
                                 for f in missing_conf_files]
 
-        action = Get([self.master], remote_missing_files, self.conf_dir)
+        action = Get([self.master], remote_missing_files, self.temp_conf_dir)
         action.run()
 
     def _create_master_and_slave_conf(self):
         """Configure master and create slaves configuration files."""
 
-        with open(self.conf_dir + "/spark-defaults.conf", "a") as defaults_file:
+        with open(self.temp_conf_dir + "/spark-defaults.conf", "a") \
+                as defaults_file:
             if self.mode == STANDALONE_MODE:
                 defaults_file.write("spark.master\t"
                                     "spark://" + self.master.address + ":" +
-                                                 str(self.spark_port) + "\n")
+                                                 str(self.port) + "\n")
             elif self.mode == YARN_MODE:
                 defaults_file.write("spark.master\tyarn-client\n")
 
-        with open(self.conf_dir + "/slaves", "w") as slaves_file:
+        with open(self.temp_conf_dir + "/slaves", "w") as slaves_file:
             for s in self.hosts:
                 slaves_file.write(s.address + "\n")
 
@@ -456,7 +458,7 @@ class SparkCluster(object):
 
         conf_files = [os.path.join(conf_dir, f) for f in os.listdir(conf_dir)]
 
-        action = TaktukPut(hosts, conf_files, self.spark_conf_dir)
+        action = TaktukPut(hosts, conf_files, self.conf_dir)
         action.run()
 
         if not action.finished_ok:
@@ -485,8 +487,8 @@ class SparkCluster(object):
         memory_per_task = int(memory_per_worker / num_cores)
 
         # Set memory for each worker
-        command = "cat >> " + self.spark_conf_dir + "/spark-env.sh << EOF\n"
-        command += "SPARK_MASTER_PORT=" + str(self.spark_port) + "\n"
+        command = "cat >> " + self.conf_dir + "/spark-env.sh << EOF\n"
+        command += "SPARK_MASTER_PORT=" + str(self.port) + "\n"
         command += "SPARK_WORKER_MEMORY=" + str(memory_per_worker) + "m\n"
         command += "EOF\n"
         action = Remote(command, self.hosts)
@@ -496,7 +498,8 @@ class SparkCluster(object):
         driver_mem = "1g"
         executor_mem = str(memory_per_task) + "m"
 
-        with open(self.conf_dir + "/spark-defaults.conf", "a") as defaults_file:
+        with open(self.temp_conf_dir + "/spark-defaults.conf", "a") \
+                as defaults_file:
             defaults_file.write("spark.executor.memory\t" + executor_mem + "\n")
             defaults_file.write("spark.driver.memory\t" + driver_mem + "\n")
             # defaults_file.write("spark.driver.maxResultSize\t1g\n")
@@ -504,7 +507,7 @@ class SparkCluster(object):
             # defaults_file.write("spark.python.worker.memory\t512m")
             defaults_file.write("spark.eventLog.enabled\ttrue\n")
             defaults_file.write("spark.eventLog.dir\t" +
-                                self.spark_event_log_dir + "\n")
+                                self.event_log_dir + "\n")
 
     def start(self):
         """Start spark processes."""
@@ -518,13 +521,13 @@ class SparkCluster(object):
 
         logger.info("Starting Spark")
 
-        if self.running_spark:
+        if self.running:
             logger.warn("Spark was already started")
             return
 
         if self.mode == STANDALONE_MODE:
-            proc = SshProcess(self.spark_sbin_dir + "/start-master.sh;" +
-                              self.spark_sbin_dir + "/start-slaves.sh;",
+            proc = SshProcess(self.sbin_dir + "/start-master.sh;" +
+                              self.sbin_dir + "/start-slaves.sh;",
                               self.master)
             proc.run()
             if not proc.finished_ok:
@@ -535,7 +538,7 @@ class SparkCluster(object):
                 logger.warn("YARN services must be started first")
                 self.hc.start_and_wait()
 
-        self.running_spark = True
+        self.running = True
 
     def stop(self):
         """Stop Spark processes."""
@@ -548,15 +551,15 @@ class SparkCluster(object):
         logger.info("Stopping Spark")
 
         if self.mode == STANDALONE_MODE:
-            proc = SshProcess(self.spark_sbin_dir + "/stop-slaves.sh;" +
-                              self.spark_sbin_dir + "/stop-master.sh;",
+            proc = SshProcess(self.sbin_dir + "/stop-slaves.sh;" +
+                              self.sbin_dir + "/stop-master.sh;",
                               self.master)
             proc.run()
             if not proc.finished_ok:
                 logger.warn("Error while stopping Spark")
                 return
 
-        self.running_spark = False
+        self.running = False
 
     def start_shell(self, language="IPYTHON", node=None, exec_params=None):
         """Open a Spark shell.
@@ -586,15 +589,15 @@ class SparkCluster(object):
         # Execute shell
         if language.upper() == "IPYTHON":
             call("ssh -t " + node.address + " " +
-                 "IPYTHON=1 " + self.spark_bin_dir + "/pyspark" + params_str,
+                 "IPYTHON=1 " + self.bin_dir + "/pyspark" + params_str,
                  shell=True)
         elif language.upper() == "PYTHON":
             call("ssh -t " + node.address + " " +
-                 self.spark_bin_dir + "/pyspark" + params_str,
+                 self.bin_dir + "/pyspark" + params_str,
                  shell=True)
         elif language.upper() == "SCALA":
             call("ssh -t " + node.address + " " +
-                 self.spark_bin_dir + "/spark-shell" + params_str,
+                 self.bin_dir + "/spark-shell" + params_str,
                  shell=True)
         else:
             logger.error("Unknown language " + language)
@@ -623,7 +626,7 @@ class SparkCluster(object):
           the job.
         """
 
-        if not self.running_spark:
+        if not self.running:
             logger.warn("The cluster was stopped. Starting it automatically")
             self.start()
 
@@ -641,10 +644,10 @@ class SparkCluster(object):
         command = job.get_command(exec_dir)
 
         # Execute
-        logger.info("Executing spark job. Command = {" + self.spark_bin_dir +
+        logger.info("Executing spark job. Command = {" + self.bin_dir +
                     "/spark-submit " + command + "} in " + str(node))
 
-        proc = SshProcess(self.spark_bin_dir + "/spark-submit " + command, node)
+        proc = SshProcess(self.bin_dir + "/spark-submit " + command, node)
 
         if verbose:
             red_color = '\033[01;31m'
@@ -666,8 +669,8 @@ class SparkCluster(object):
     def clean_conf(self):
         """Clean configuration files used by this cluster."""
 
-        if self.conf_dir and os.path.exists(self.conf_dir):
-            shutil.rmtree(self.conf_dir)
+        if self.temp_conf_dir and os.path.exists(self.temp_conf_dir):
+            shutil.rmtree(self.temp_conf_dir)
 
     def clean_logs(self):
         """Remove all Spark logs."""
@@ -675,13 +678,13 @@ class SparkCluster(object):
         logger.info("Cleaning logs")
 
         restart = False
-        if self.running_spark:
+        if self.running:
             logger.warn("The cluster needs to be stopped before cleaning.")
             self.stop()
             restart = True
 
-        action = Remote("rm -rf " + self.spark_logs_dir + "/* " +
-                                    self.spark_work_dir + "/*",
+        action = Remote("rm -rf " + self.logs_dir + "/* " +
+                                    self.work_dir + "/*",
                         self.hosts)
         action.run()
 
@@ -691,7 +694,7 @@ class SparkCluster(object):
     def clean(self):
         """Remove all files created by Spark."""
 
-        if self.running_spark:
+        if self.running:
             logger.warn("The cluster needs to be stopped before cleaning.")
             self.stop()
 
