@@ -123,7 +123,6 @@ class HadoopCluster(object):
 
         # Create topology
         self.topology = HadoopTopology(hosts, topo_list)
-
         # Store cluster information
         self.host_clusters = {}
         for h in self.hosts:
@@ -132,11 +131,18 @@ class HadoopCluster(object):
                 self.host_clusters[g5k_cluster].append(h)
             else:
                 self.host_clusters[g5k_cluster] = [h]
-
+        # Create a string to display the topology
+        t = {v: [] for v in self.topology.topology.values()}
+        for key, value in self.topology.topology.iteritems():
+            t[value].append(key.address)
+        log_topo = ', '.join([style.user2(k) + ': ' +
+                              ' '.join(map(lambda x: style.host(x.split('.')[0]), v)) 
+                              for k, v in t.iteritems()])
+        
         logger.info("Hadoop cluster created with master %s, hosts %s and topology %s",
                     style.host(self.master.address), 
                     ' '.join([style.host(h.address.split('.')[0]) for h in self.hosts]),
-                    str(self.topology))
+                    log_topo)
 
     def bootstrap(self, tar_file):
         """Install Hadoop in all cluster nodes from the specified tar.gz file.
