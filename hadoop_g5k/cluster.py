@@ -7,6 +7,7 @@ import tempfile
 
 from ConfigParser import ConfigParser
 
+from execo.log import style
 from execo.action import Put, TaktukPut, Get, Remote, TaktukRemote
 from execo.process import SshProcess
 from execo_engine import logger
@@ -132,8 +133,9 @@ class HadoopCluster(object):
             else:
                 self.host_clusters[g5k_cluster] = [h]
 
-        logger.info("Hadoop cluster created with master " + str(self.master) +
-                    ", hosts " + str(self.hosts) + " and topology " +
+        logger.info("Hadoop cluster created with master %s, hosts %s and topology %s",
+                    style.host(self.master.address), 
+                    ' '.join([style.host(h.address.split('.')[0]) for h in self.hosts]),
                     str(self.topology))
 
     def bootstrap(self, tar_file):
