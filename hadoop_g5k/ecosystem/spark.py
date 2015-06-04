@@ -147,13 +147,13 @@ class PythonSparkJob(SparkJob):
         return exec_params_str + libs_param + job_file + app_params_str
 
 
-class ScalaSparkJob(SparkJob):
+class JavaOrScalaSparkJob(SparkJob):
 
     def __init__(self, job_path, exec_params=None, app_params=None,
                  lib_paths=None, main_class=None):
 
-        super(ScalaSparkJob, self).__init__(job_path, exec_params, app_params,
-                                            lib_paths)
+        super(JavaOrScalaSparkJob, self).__init__(job_path, exec_params,
+                                                  app_params, lib_paths)
 
         if not main_class:
             call("/usr/bin/jar xf " +

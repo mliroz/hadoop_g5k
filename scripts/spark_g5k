@@ -11,7 +11,7 @@ from execo_engine import logger
 
 from hadoop_g5k.cluster import HadoopCluster
 from hadoop_g5k.ecosystem.spark import SparkCluster, STANDALONE_MODE, YARN_MODE, \
-    ScalaSparkJob, PythonSparkJob
+    JavaOrScalaSparkJob, PythonSparkJob
 from hadoop_g5k.util import generate_hosts
 from hadoop_g5k.serialization import generate_new_id, \
     get_default_id, deserialize_cluster, remove_cluster, serialize_cluster, \
@@ -125,6 +125,13 @@ if __name__ == "__main__":
                          help="Start the master and slaves")
 
     exec_group = actions.add_mutually_exclusive_group()
+
+    exec_group.add_argument("--java_job",
+                            action="store",
+                            nargs="+",
+                            metavar=("LOCAL_JOB_PATH", "PARAM"),
+                            help="Copy the Java job to the cluster and execute"
+                                 " it with the specified parameters")
 
     exec_group.add_argument("--scala_job",
                             action="store",
@@ -279,7 +286,7 @@ if __name__ == "__main__":
     if args.start:
         sc.start()
 
-    if args.shell or args.scala_job or args.py_job:
+    if args.shell or args.java_job or args.scala_job or args.py_job:
         node_host = Host(args.node[0]) if args.node else None
         lib_paths = args.lib_paths if args.lib_paths else None
 
@@ -292,14 +299,16 @@ if __name__ == "__main__":
             sc.start_shell(language=args.shell,
                            node=node_host,
                            exec_params=exec_params)
-        elif args.scala_job or args.py_job:
-            if args.scala_job:
+        elif args.java_job or args.scala_job or args.py_job:
+            if args.java_job or args.scala_job:
+                sjob = args.java_job if args.java_job else args.scala_job
+
                 main_class = args.main_class[0] if args.main_class else None
-                job = ScalaSparkJob(job_path=args.scala_job[0],
-                                    exec_params=exec_params,
-                                    app_params=args.scala_job[1:],
-                                    lib_paths=lib_paths,
-                                    main_class=main_class)
+                job = JavaOrScalaSparkJob(job_path=sjob[0],
+                                          exec_params=exec_params,
+                                          app_params=sjob[1:],
+                                          lib_paths=lib_paths,
+                                          main_class=main_class)
             else:  # elif args.py_job:
                 job = PythonSparkJob(job_path=args.py_job[0],
                                      exec_params=exec_params,
@@ -314,14 +323,14 @@ if __name__ == "__main__":
 
     else:
         if args.node:
-            logger.warn("--node only applies to --scala_job, --py_job or "
-                        "--shell. Ignoring argument")
+            logger.warn("--node only applies to --java_job, --scala_job, "
+                        "--py_job or --shell. Ignoring argument")
         if args.exec_params:
-            logger.warn("--exec_params only applies to --scala_job, --py_job or"
-                        " --shell. Ignoring argument")
+            logger.warn("--exec_params only applies to --java_job, "
+                        "--scala_job, --py_job or --shell. Ignoring argument")
         if args.lib_paths:
-            logger.warn("--lib_paths only applies to --scala_job, --py_job or"
-                        " --shell. Ignoring argument")
+            logger.warn("--lib_paths only applies to --java_job, --scala_job, "
+                        "--py_job or --shell. Ignoring argument")
 
     if args.stop:
         sc.stop()
