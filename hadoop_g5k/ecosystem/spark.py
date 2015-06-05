@@ -10,6 +10,7 @@ from subprocess import call
 
 from execo.action import Put, TaktukPut, Get, Remote, TaktukRemote, \
     SequentialActions
+from execo.log import style
 from execo.process import SshProcess
 from execo_engine import logger
 from execo_g5k import get_host_attributes
@@ -297,10 +298,11 @@ class SparkCluster(object):
             mode_text = "in standalone mode"
         else:
             mode_text = "on top of YARN"
-
-        logger.info("Spark cluster created " + mode_text + " in hosts " +
-                    str(self.hosts) + "." +
-                    " It is linked to a Hadoop cluster." if self.hc else "")
+        logger.info("Spark cluster created %s in hosts %s."
+                    " It is linked to a Hadoop cluster." if self.hc else "",
+                    mode_text,
+                    ' '.join([style.host(h.address.split('.')[0])
+                              for h in self.hosts]))
 
     def bootstrap(self, tar_file):
 

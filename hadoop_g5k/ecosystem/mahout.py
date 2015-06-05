@@ -4,6 +4,7 @@ import sys
 from ConfigParser import ConfigParser
 
 from execo.action import Remote, Put
+from execo.log import style
 from execo.process import SshProcess
 from execo_engine import logger
 from hadoop_g5k.util import ColorDecorator
@@ -46,7 +47,9 @@ class MahoutCluster(object):
         self.hc = hadoop_cluster
 
         # Create topology
-        logger.info("Mahout cluster created in hosts " + str(self.hc.hosts))
+        logger.info("Mahout cluster created in hosts %s",
+                    ' '.join([style.host(h.address.split('.')[0])
+                              for h in self.hc.hosts]))
 
     def bootstrap(self, tar_file):
 
