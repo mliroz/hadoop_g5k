@@ -8,7 +8,8 @@ import tempfile
 from ConfigParser import ConfigParser
 
 from execo.log import style
-from execo.action import Put, TaktukPut, Get, Remote, TaktukRemote
+from execo.action import Put, TaktukPut, Get, Remote, TaktukRemote, \
+    SequentialActions
 from execo.process import SshProcess
 from execo_engine import logger
 from execo_g5k.api_utils import get_host_attributes, get_host_cluster
@@ -131,6 +132,7 @@ class HadoopCluster(object):
                 self.host_clusters[g5k_cluster].append(h)
             else:
                 self.host_clusters[g5k_cluster] = [h]
+
         # Create a string to display the topology
         t = {v: [] for v in self.topology.topology.values()}
         for key, value in self.topology.topology.iteritems():
@@ -175,43 +177,36 @@ class HadoopCluster(object):
 
         logger.info("All required packages are present")
 
-        # 1. Remove used dirs if existing
-        action = Remote("rm -rf " + self.base_dir, self.hosts)
-        action.run()
-        action = Remote("rm -rf " + self.conf_dir, self.hosts)
-        action.run()
-        action = Remote("rm -rf " + self.logs_dir, self.hosts)
-        action.run()
-        action = Remote("rm -rf " + self.hadoop_temp_dir, self.hosts)
-        action.run()
-
         # 1. Copy hadoop tar file and uncompress
         logger.info("Copy " + tar_file + " to hosts and uncompress")
-        action = TaktukPut(self.hosts, [tar_file], "/tmp")
-        action.run()
-        action = Remote(
+        rm_dirs = Remote("rm -rf " + self.base_dir +
+                         " " + self.conf_dir +
+                         " " + self.logs_dir +
+                         " " + self.hadoop_temp_dir,
+                         self.hosts)
+        put_tar = TaktukPut(self.hosts, [tar_file], "/tmp")
+        tar_xf = TaktukRemote(
             "tar xf /tmp/" + os.path.basename(tar_file) + " -C /tmp",
             self.hosts)
-        action.run()
+        SequentialActions([rm_dirs, put_tar, tar_xf]).run()
 
-        # 2. Move installation to base dir
+        # 2. Move installation to base dir and create other dirs
         logger.info("Create installation directories")
-        action = Remote(
+        mv_base_dir = TaktukRemote(
             "mv /tmp/" +
             os.path.basename(tar_file).replace(".tar.gz", "") + " " +
             self.base_dir,
             self.hosts)
-        action.run()
-
-        # 3 Create other dirs        
-        action = Remote("mkdir -p " + self.conf_dir, self.hosts)
-        action.run()
-
-        action = Remote("mkdir -p " + self.logs_dir, self.hosts)
-        action.run()
-
-        action = Remote("mkdir -p " + self.hadoop_temp_dir, self.hosts)
-        action.run()
+        mkdirs = TaktukRemote("mkdir -p " + self.conf_dir +
+                              " && mkdir -p " + self.logs_dir +
+                              " && mkdir -p " + self.hadoop_temp_dir,
+                              self.hosts)
+        chmods = TaktukRemote("chmod g+w " + self.base_dir +
+                              " && chmod g+w " + self.conf_dir +
+                              " && chmod g+w " + self.logs_dir +
+                              " && chmod g+w " + self.hadoop_temp_dir,
+                              self.hosts)
+        SequentialActions([mv_base_dir, mkdirs, chmods]).run()
 
         # 4. Specify environment variables
         command = "cat >> " + self.conf_dir + "/hadoop-env.sh << EOF\n"
