@@ -21,6 +21,7 @@ from hadoop_g5k.util import ColorDecorator
 DEFAULT_SPARK_BASE_DIR = "/tmp/spark"
 DEFAULT_SPARK_CONF_DIR = DEFAULT_SPARK_BASE_DIR + "/conf"
 DEFAULT_SPARK_LOGS_DIR = DEFAULT_SPARK_BASE_DIR + "/logs"
+DEFAULT_SPARK_EVENTS_DIR = ""
 DEFAULT_SPARK_WORK_DIR = DEFAULT_SPARK_BASE_DIR + "/work"
 DEFAULT_SPARK_PORT = 7077
 
@@ -227,6 +228,7 @@ class SparkCluster(object):
         "spark_base_dir": DEFAULT_SPARK_BASE_DIR,
         "spark_conf_dir": DEFAULT_SPARK_CONF_DIR,
         "spark_logs_dir": DEFAULT_SPARK_LOGS_DIR,
+        "spark_events_dir": DEFAULT_SPARK_EVENTS_DIR,
         "spark_work_dir": DEFAULT_SPARK_WORK_DIR,
         "spark_port": str(DEFAULT_SPARK_PORT),
 
@@ -260,7 +262,7 @@ class SparkCluster(object):
         self.base_dir = config.get("cluster", "spark_base_dir")
         self.conf_dir = config.get("cluster", "spark_conf_dir")
         self.logs_dir = config.get("cluster", "spark_logs_dir")
-        self.event_log_dir = self.logs_dir + "/events"
+        self.evs_log_dir = config.get("cluster", "spark_events_dir")
         self.work_dir = config.get("cluster", "spark_work_dir")
         self.port = config.getint("cluster", "spark_port")
         self.local_base_conf_dir = config.get("local", "local_base_conf_dir")
@@ -346,11 +348,25 @@ class SparkCluster(object):
             "mv /tmp/" + os.path.basename(tar_file).replace(".tgz", "") + " " +
             self.base_dir,
             self.hosts)
-        mkdirs = TaktukRemote("mkdir -p " + self.conf_dir, self.hosts)
+        mkdirs = TaktukRemote("mkdir -p " + self.conf_dir +
+                              " && mkdir -p " + self.logs_dir,
+                              self.hosts)
         chmods = TaktukRemote("chmod g+w " + self.base_dir +
-                              " && chmod g+w " + self.conf_dir,
+                              " && chmod g+w " + self.conf_dir +
+                              " && chmod g+w " + self.logs_dir,
                               self.hosts)
         SequentialActions([mv_base_dir, mkdirs, chmods]).run()
+
+        # 2.1. Create spark-events dir
+        if self.evs_log_dir:
+            if self.evs_log_dir.startswith("file://") or \
+                            "://" not in self.evs_log_dir:
+                mk_evs_dir = TaktukRemote("mkdir -p " + self.evs_log_dir +
+                                          " && chmod g+w " + self.evs_log_dir,
+                                          self.hosts)
+                mk_evs_dir.run()
+            elif self.evs_log_dir.startswith("hdfs://"):
+                self.hc.execute("fs -mkdir -p " + self.evs_log_dir)
 
         # 3. Specify environment variables
         command = "cat >> " + self.conf_dir + "/spark-env.sh << EOF\n"
@@ -504,9 +520,10 @@ class SparkCluster(object):
             # defaults_file.write("spark.driver.maxResultSize\t1g\n")
             defaults_file.write("spark.logConf\ttrue\n")
             # defaults_file.write("spark.python.worker.memory\t512m")
-            defaults_file.write("spark.eventLog.enabled\ttrue\n")
-            defaults_file.write("spark.eventLog.dir\t" +
-                                self.event_log_dir + "\n")
+            if self.evs_log_dir:
+                defaults_file.write("spark.eventLog.enabled\ttrue\n")
+                defaults_file.write("spark.eventLog.dir\t" +
+                                    self.evs_log_dir + "\n")
 
     def start(self):
         """Start spark processes."""
