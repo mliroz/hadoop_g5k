@@ -105,10 +105,11 @@ def generate_hosts(hosts_input):
 
     Args:
       hosts_input: The path of the file containing the hosts to be used,
-        or a comma separated list of site:job_id or an oargrid_job_id.
+        or a comma separated list of site:job_id or an a comma separated list
+        of hosts or an oargrid_job_id.
         If a file is used, each host should be in a different line.
         Repeated hosts are pruned.
-        Hint: in a running Grid5000 job,  $OAR_NODEFILE should be used.
+        Hint: in a running Grid5000 job, $OAR_NODEFILE should be used.
 
     Return:
       list of Host: The list of hosts.
@@ -124,6 +125,12 @@ def generate_hosts(hosts_input):
         for job in hosts_input.split(','):
             site, job_id = job.split(':')
             hosts += get_oar_job_nodes(int(job_id), site)
+    elif "," in hosts_input:
+        # We assume the string is a comma separated list of hosts
+        for hstr in hosts_input.split(','):
+            h = Host(hstr.rstrip())
+            if h not in hosts:
+                hosts.append(h)
     else:
         # If the file_name is a number, we assume this is a oargrid_job_id
         hosts = get_oargrid_job_nodes(int(hosts_input))

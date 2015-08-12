@@ -206,6 +206,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    changed = False
+
     # Get id
     if args.id:
         hc_id = int(args.id[0])
@@ -260,6 +262,7 @@ if __name__ == "__main__":
             hc = hadoop_class(hosts, None, args.properties[0])
         else:
             hc = hadoop_class(hosts)
+        changed = True
 
     else:
         if args.version:
@@ -291,9 +294,11 @@ if __name__ == "__main__":
             logger.error("Hadoop distribution file " + f + " does not exist")
             sys.exit(os.EX_NOINPUT)
         hc.bootstrap(args.bootstrap[0])
+        changed = True
 
     if args.initialize:
         hc.initialize()
+        changed = True
 
     if args.changeconf:
         params = {}
@@ -302,9 +307,11 @@ if __name__ == "__main__":
             params[parts[0]] = parts[1]
 
         hc.change_conf(params)
+        changed = True
 
     if args.start:
         hc.start_and_wait()
+        changed = True
 
     if args.putindfs:
         local_paths = args.putindfs[:-1]
@@ -364,6 +371,8 @@ if __name__ == "__main__":
         for t in threads:
             t.join()
 
+        changed = True
+
     if args.getfromdfs:
         remote_path = args.getfromdfs[0]
         local_path = args.getfromdfs[1]
@@ -390,6 +399,8 @@ if __name__ == "__main__":
         else:
             hc.execute(args.execute[0], verbose=verbose)
 
+        changed = True
+
     if args.jarjob:
         if not node_host:
             node_host = None
@@ -406,14 +417,18 @@ if __name__ == "__main__":
         else:
             print "Job finished with errors"
 
+        changed = True
+
     if args.copyhistory:
         hc.copy_history(args.copyhistory[0], args.copyhistory[1:])
 
     if args.stop:
         hc.stop()
+        changed = True
 
     if args.clean:
         hc.clean()
+        changed = True
 
     if args.state:
         if args.state == "general":
@@ -494,4 +509,5 @@ if __name__ == "__main__":
             print stdout
             print ""
 
-    serialize_cluster(HadoopCluster.get_cluster_type(), hc_id, hc)
+    if changed:
+        serialize_cluster(HadoopCluster.get_cluster_type(), hc_id, hc)
