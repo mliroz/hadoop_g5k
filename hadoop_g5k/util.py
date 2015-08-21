@@ -131,9 +131,14 @@ def generate_hosts(hosts_input):
             h = Host(hstr.rstrip())
             if h not in hosts:
                 hosts.append(h)
-    else:
+    elif hosts_input.isdigit():
         # If the file_name is a number, we assume this is a oargrid_job_id
         hosts = get_oargrid_job_nodes(int(hosts_input))
+    else:
+        # If not any of the previous, we assume is a single-host cluster where
+        # the given input is the only host
+        hosts = [Host(hosts_input.rstrip())]
+
     logger.debug('Hosts list: \n%s',
                  ' '.join(style.host(host.address.split('.')[0])
                           for host in hosts))
