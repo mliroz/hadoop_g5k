@@ -171,6 +171,11 @@ def create_xml_file(f):
         fout.write("</configuration>")
 
 
+def __replace_line(line, value):
+    return re.sub(r'(.*)<value>[^<]*</value>(.*)', r'\g<1><value>' + value +
+                  r'</value>\g<2>', line)
+
+
 def replace_in_xml_file(f, name, value, create_if_absent=False):
     """Assign the given value to variable name in xml file f.
 
@@ -230,6 +235,36 @@ def replace_in_xml_file(f, name, value, create_if_absent=False):
     return changed
 
 
-def __replace_line(line, value):
-    return re.sub(r'(.*)<value>[^<]*</value>(.*)', r'\g<1><value>' + value +
-                  r'</value>\g<2>', line)
+def get_xml_params(f, param_names):
+
+    if not param_names:
+        return {}
+
+    local_param_names = param_names[:]
+
+    params = {}
+    for name in local_param_names:
+        params[name] = None
+
+    with open(f) as inf:
+        line = inf.readline()
+        while line != "":
+            for name in local_param_names:
+                if "<name>" + name + "</name>" in line:
+                    if "<value>" in line:
+                        match = re.match('.*<value>([^<]*)</value>.*', line)
+                        params[name] = match.group(1)
+                    else:
+                        line = inf.readline()
+                        if line != "":
+                            match = re.match('.*<value>([^<]*)</value>.*', line)
+                            params[name] = match.group(1)
+                        else:
+                            logger.error("Configuration file " + f +
+                                         " is not correctly formatted")
+
+                    del(name)
+                line = inf.readline()
+        inf.close()
+
+    return params

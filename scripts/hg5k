@@ -136,6 +136,12 @@ if __name__ == "__main__":
                          metavar="NAME=VALUE",
                          help="Change given configuration variables")
 
+    actions.add_argument("--getconf",
+                         action="store",
+                         nargs="+",
+                         metavar="PARAM_NAME",
+                         help="Get the values of the specified variables")
+
     actions.add_argument("--start",
                          dest="start",
                          action="store_true",
@@ -429,6 +435,11 @@ if __name__ == "__main__":
     if args.clean:
         hc.clean()
         changed = True
+
+    if args.getconf:
+        params = hc.get_conf(args.getconf)
+        for p in params:
+            print p + " = " + params[p]
 
     if args.state:
         if args.state == "general":

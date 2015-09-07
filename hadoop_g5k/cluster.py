@@ -15,7 +15,7 @@ from execo_engine import logger
 from execo_g5k.api_utils import get_host_attributes, get_host_cluster
 
 from hadoop_g5k.objects import HadoopJarJob, HadoopTopology, HadoopException
-from hadoop_g5k.util import ColorDecorator, replace_in_xml_file
+from hadoop_g5k.util import ColorDecorator, replace_in_xml_file, get_xml_params
 
 # Configuration files
 CORE_CONF_FILE = "core-site.xml"
@@ -365,9 +365,12 @@ class HadoopCluster(object):
         replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
                             "mapred.tasktracker.reduce.tasks.maximum",
                             str(num_cores - 1), True)
-        replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
-                            "mapred.child.java.opts",
-                            "-Xmx" + str(mem_per_slot_mb) + "m", True)
+        if mem_per_slot_mb <= 0:
+            logger.warn("Memory is negative, no setting")
+        else:
+            replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
+                                "mapred.child.java.opts",
+                                "-Xmx" + str(mem_per_slot_mb) + "m", True)
 
     def _copy_conf(self, conf_dir, hosts=None):
         """Copy configuration files from given dir to remote dir in cluster
@@ -439,6 +442,40 @@ class HadoopCluster(object):
 
             # Copy back the files to all hosts
             self._copy_conf(tmp_dir, hosts)
+
+    def get_conf(self, param_names):
+
+        params = {}
+        remaining_param_names = param_names[:]
+
+        # Copy conf files from first host in the cluster
+        action = Remote("ls " + self.conf_dir + "/*.xml", [self.hosts[0]])
+        action.run()
+        output = action.processes[0].stdout
+
+        remote_conf_files = []
+        for f in output.split():
+            remote_conf_files.append(os.path.join(self.conf_dir, f))
+
+        tmp_dir = "/tmp/mliroz_temp_hadoop/"
+        if not os.path.exists(tmp_dir):
+            os.makedirs(tmp_dir)
+
+        action = Get([self.hosts[0]], remote_conf_files, tmp_dir)
+        action.run()
+
+        # Do replacements in temp file
+        temp_conf_files = [os.path.join(tmp_dir, f) for f in
+                           os.listdir(tmp_dir)]
+
+        for f in temp_conf_files:
+            fparams = get_xml_params(f, remaining_param_names)
+            for p in fparams:
+                if fparams[p]:
+                    params[p] = fparams[p]
+                    remaining_param_names.remove(p)
+
+        return params
 
     def format_dfs(self):
         """Format the distributed filesystem."""
