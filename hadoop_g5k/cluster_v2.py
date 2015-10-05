@@ -155,9 +155,8 @@ class HadoopV2Cluster(HadoopCluster):
                             "-Xmx" + str(mem_per_task_mb) + "m", True)
 
         replace_in_xml_file(os.path.join(self.temp_conf_dir, YARN_CONF_FILE),
-                            "yarn.resourcemanager.address",
-                            self.master.address + ":" +
-                            str(self.mapred_port), True)
+                            "yarn.resourcemanager.hostname",
+                            self.master.address, True)
         replace_in_xml_file(os.path.join(self.temp_conf_dir, YARN_CONF_FILE),
                             "yarn.nodemanager.resource.memory-mb",
                             str(total_memory_mb), True)
