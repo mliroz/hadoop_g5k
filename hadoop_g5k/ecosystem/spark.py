@@ -287,21 +287,19 @@ class SparkCluster(object):
                                  "cluster.")
 
         # Store reference to Hadoop cluster and check if mandatory
-        if hadoop_cluster:
-            self.hc = hadoop_cluster
-        else:
-            if mode == YARN_MODE:
-                logger.error("When using a YARN_MODE mode, a reference to the "
-                             "Hadoop cluster should be provided.")
-                raise SparkException("When using a YARN_MODE mode, a reference "
-                                     "to the Hadoop cluster should be provided")
+        self.hc = hadoop_cluster
+        if not self.hc and mode == YARN_MODE:
+            logger.error("When using a YARN_MODE mode, a reference to the "
+                         "Hadoop cluster should be provided.")
+            raise SparkException("When using a YARN_MODE mode, a reference "
+                                 "to the Hadoop cluster should be provided")
 
         if self.mode == STANDALONE_MODE:
             mode_text = "in standalone mode"
         else:
             mode_text = "on top of YARN"
-        logger.info("Spark cluster created %s in hosts %s."
-                    " It is linked to a Hadoop cluster." if self.hc else "",
+        logger.info("Spark cluster created %s in hosts %s." +
+                    (" It is linked to a Hadoop cluster." if self.hc else ""),
                     mode_text,
                     ' '.join([style.host(h.address.split('.')[0])
                               for h in self.hosts]))
