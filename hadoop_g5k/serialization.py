@@ -154,7 +154,8 @@ def remove_cluster(cluster_type, cid):
 
     if cluster_type != HadoopCluster.get_cluster_type():
         hc_link_fname = __get_hc_link_file(cluster_type, cid)
-        os.remove(hc_link_fname)
+        if os.path.exists(hc_link_fname):
+            os.remove(hc_link_fname)
 
 
 def link_to_hadoop_cluster(cluster_type, cid, hc_id):

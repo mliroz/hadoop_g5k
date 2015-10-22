@@ -286,33 +286,24 @@ class SparkCluster(object):
                                  " directly or indirectly through a Hadoop "
                                  "cluster.")
 
+        
         # Store reference to Hadoop cluster and check if mandatory
         self.hc = hadoop_cluster
-        if mode == YARN_MODE and self.hc == None:
-                logger.error("When using a YARN_MODE mode, a reference to the "
-                             "Hadoop cluster should be provided.")
-                raise SparkException("When using a YARN_MODE mode, a reference "
-                                     "to the Hadoop cluster should be provided")
+        if not self.hc and mode == YARN_MODE:
+            logger.error("When using a YARN_MODE mode, a reference to the "
+                         "Hadoop cluster should be provided.")
+            raise SparkException("When using a YARN_MODE mode, a reference "
+                                 "to the Hadoop cluster should be provided")
 
         if self.mode == STANDALONE_MODE:
             mode_text = "in standalone mode"
         else:
             mode_text = "on top of YARN"
-
-        if self.hc != None:
-            cluster_text = " It is linked to a Hadoop cluster."
-        else:
-            cluster_text = ""
-
-        hosts = ' '.join([style.host(h.address.split('.')[0]) for h in self.hosts])
-
-        if self.hc:
-            logger.info("Spark cluster created %s in hosts %s.%s", mode_text,
-                    hosts, cluster_text)
-        else:
-            logger.info("Spark cluster created %s in hosts %s.%s", mode_text,
-                    hosts, cluster_text)
-
+        logger.info("Spark cluster created %s in hosts %s." +
+                    (" It is linked to a Hadoop cluster." if self.hc else ""),
+                    mode_text,
+                    ' '.join([style.host(h.address.split('.')[0])
+                              for h in self.hosts]))
 
     def bootstrap(self, tar_file):
 
