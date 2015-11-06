@@ -729,7 +729,7 @@ class SparkCluster(object):
 
         force_kill = False
         for h in self.hosts:
-            proc = SshProcess("jps", self.master)
+            proc = SshProcess("jps", h)
             proc.run()
 
             ids_to_kill = []
@@ -743,6 +743,10 @@ class SparkCluster(object):
                 ids_to_kill_str = ""
                 for pid in ids_to_kill:
                     ids_to_kill_str += " " + pid
+
+                logger.warn(
+                    "Killing running Spark processes in host %s" %
+                    style.host(h.address.split('.')[0]))
 
                 proc = SshProcess("kill -9" + ids_to_kill_str, h)
                 proc.run()
