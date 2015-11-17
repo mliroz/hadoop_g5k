@@ -164,9 +164,7 @@ if __name__ == "__main__":
 
     logger.info("Using id = " + str(hivec_id) + " (HIVE)")
 
-    verbose = True
-    if args.quiet:
-        verbose = False
+    verbose = not args.quiet
 
     # Create or load object
     if args.create:

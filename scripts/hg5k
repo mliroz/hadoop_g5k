@@ -229,9 +229,7 @@ if __name__ == "__main__":
 
     logger.info("Using id = " + str(hc_id) + " (HADOOP)")
 
-    verbose = True
-    if args.quiet:
-        verbose = False
+    verbose = not args.quiet
 
     # Check node specification
     node_host = None

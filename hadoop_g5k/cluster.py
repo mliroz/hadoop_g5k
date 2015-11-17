@@ -119,11 +119,12 @@ class HadoopCluster(object):
         self.sbin_dir = self.base_dir + "/bin"
 
         # Configure master and slaves
-        self.hosts = hosts
-        self.master = hosts[0]
+        self.hosts = list(hosts)
+        self.master = self.hosts[0]
 
         # Create topology
         self.topology = HadoopTopology(hosts, topo_list)
+
         # Store cluster information
         self.host_clusters = {}
         for h in self.hosts:
@@ -138,7 +139,7 @@ class HadoopCluster(object):
         for key, value in self.topology.topology.iteritems():
             t[value].append(key.address)
         log_topo = ', '.join([style.user2(k) + ': ' +
-                              ' '.join(map(lambda x: style.host(x.split('.')[0]), v)) 
+                              ' '.join(map(lambda x: style.host(x.split('.')[0]), v))
                               for k, v in t.iteritems()])
         
         logger.info("Hadoop cluster created with master %s, hosts %s and topology %s",
@@ -225,9 +226,9 @@ class HadoopCluster(object):
         if not (version.startswith("Hadoop 0.") or
                 version.startswith("Hadoop 1.")):
             logger.error("Version of HadoopCluster is not compliant with the "
-                        "distribution provided in the bootstrap option. Use "
-                        "the appropiate parameter for --version when creating "
-                        "the cluster or use another distribution.")
+                         "distribution provided in the bootstrap option. Use "
+                         "the appropriate parameter for --version when "
+                         "creating the cluster or use another distribution.")
             return False
         else:
             return True
@@ -446,7 +447,7 @@ class HadoopCluster(object):
     def get_conf(self, param_names):
 
         params = {}
-        remaining_param_names = param_names[:]
+        remaining_param_names = set(param_names)
 
         # Copy conf files from first host in the cluster
         action = Remote("ls " + self.conf_dir + "/*.xml", [self.hosts[0]])
@@ -473,7 +474,7 @@ class HadoopCluster(object):
             for p in fparams:
                 if fparams[p]:
                     params[p] = fparams[p]
-                    remaining_param_names.remove(p)
+                    remaining_param_names.discard(p)
 
         return params
 
@@ -671,7 +672,7 @@ class HadoopCluster(object):
         proc.start()
         proc.wait()
 
-        return (proc.stdout, proc.stderr)
+        return proc.stdout, proc.stderr
 
     def execute_job(self, job, node=None, verbose=True):
         """Execute the given MapReduce job in the specified node.
@@ -741,7 +742,7 @@ class HadoopCluster(object):
                     except:
                         pass
 
-        return (proc.stdout, proc.stderr)
+        return proc.stdout, proc.stderr
 
     def copy_history(self, dest, job_ids=None):
         """Copy history logs from master.

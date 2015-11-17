@@ -85,8 +85,8 @@ if __name__ == "__main__":
                               dest="nodes",
                               nargs=1,
                               action="store",
-                              help="Use the nodes in MACHINELIST file. Applies "
-                                   "only to --create")
+                              help="Use the nodes in MACHINELIST file. Applies"
+                                   " only to --create")
 
     object_group.add_argument("--hid",
                               metavar="ID",
@@ -102,8 +102,8 @@ if __name__ == "__main__":
                               action="store",
                               help="Install Spark in the cluster nodes taking"
                                    " into account the specified properties.\n"
-                                   "SPARK_TAR defines the path of the .tgz file"
-                                   " containing Spark binaries.")
+                                   "SPARK_TAR defines the path of the .tgz "
+                                   "file containing Spark binaries.")
 
     actions = parser.add_argument_group(style.host("Spark actions"),
                                         "Actions to execute in the Spark "
@@ -194,8 +194,8 @@ if __name__ == "__main__":
                            action="store",
                            nargs="+",
                            metavar="PARAM",
-                           help="The options for job execution. Options should "
-                                "be written without the \"--\" prefix (e.g., "
+                           help="The options for job execution. Options should"
+                                " be written without the \"--\" prefix (e.g., "
                                 "--exec_params driver-memory=1g)")
 
     args = parser.parse_args()
@@ -215,9 +215,7 @@ if __name__ == "__main__":
 
     logger.info("Using id = " + str(sc_id) + " (SPARK)")
 
-    verbose = True
-    if args.quiet:
-        verbose = False
+    verbose = not args.quiet
 
     # Create or load object
     if args.create:

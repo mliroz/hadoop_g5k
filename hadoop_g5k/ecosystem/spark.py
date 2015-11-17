@@ -75,11 +75,11 @@ class SparkJob(object):
             The list of local paths to the libraries used by the job.
         """
 
-        if not exec_params:
+        if exec_params is None:
             exec_params = []
-        if not app_params:
+        if app_params is None:
             app_params = []
-        if not lib_paths:
+        if lib_paths is None:
             lib_paths = []
 
         # Check if the jar file exists
@@ -593,7 +593,7 @@ class SparkCluster(object):
             node = self.master
 
         # Configure execution options
-        if not exec_params:
+        if exec_params is None:
             exec_params = []
 
         if self.mode == YARN_MODE:
@@ -645,7 +645,7 @@ class SparkCluster(object):
             logger.warn("The cluster was stopped. Starting it automatically")
             self.start()
 
-        if not node:
+        if node is None:
             node = self.master
 
         exec_dir = "/tmp"
