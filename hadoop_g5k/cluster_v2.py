@@ -115,14 +115,13 @@ class HadoopV2Cluster(HadoopCluster):
         if not hosts:
             hosts = self.hosts
 
+        # Node variables
         host_attrs = get_host_attributes(hosts[0])
         num_cores = host_attrs[u'architecture'][u'smt_size']
         available_memory = (int(host_attrs[u'main_memory'][u'ram_size']) /
                             (1024 * 1024))
-        total_memory_mb = min(available_memory - 2 * 1024,
-                              int(0.75 * available_memory))
-        mem_per_task_mb = total_memory_mb / (num_cores - 1)
 
+        # General and HDFS
         replace_in_xml_file(os.path.join(self.temp_conf_dir, CORE_CONF_FILE),
                             "fs.defaultFS",
                             "hdfs://" + self.master.address + ":" +
@@ -134,6 +133,30 @@ class HadoopV2Cluster(HadoopCluster):
         replace_in_xml_file(os.path.join(self.temp_conf_dir, CORE_CONF_FILE),
                             "topology.script.file.name",
                             self.conf_dir + "/topo.sh", True)
+
+        # YARN
+        total_containers_mem_mb = min(available_memory - 2 * 1024,
+                                      int(0.75 * available_memory))
+        max_container_mem_mb = total_containers_mem_mb
+
+        replace_in_xml_file(os.path.join(self.temp_conf_dir, YARN_CONF_FILE),
+                            "yarn.resourcemanager.hostname",
+                            self.master.address, True)
+        replace_in_xml_file(os.path.join(self.temp_conf_dir, YARN_CONF_FILE),
+                            "yarn.nodemanager.resource.memory-mb",
+                            str(total_containers_mem_mb), True)
+        replace_in_xml_file(os.path.join(self.temp_conf_dir, YARN_CONF_FILE),
+                            "yarn.nodemanager.resource.cpu-vcores",
+                            str(num_cores - 1), True)
+        replace_in_xml_file(os.path.join(self.temp_conf_dir, YARN_CONF_FILE),
+                            "yarn.scheduler.maximum-allocation-mb",
+                            str(max_container_mem_mb), True)
+        replace_in_xml_file(os.path.join(self.temp_conf_dir, YARN_CONF_FILE),
+                            "yarn.nodemanager.aux-services",
+                            "mapreduce_shuffle", True)
+
+        # MapReduce
+        mem_per_task_mb = total_containers_mem_mb / (num_cores - 1)
 
         replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
                             "mapreduce.framework.name", "yarn", True)
@@ -153,22 +176,6 @@ class HadoopV2Cluster(HadoopCluster):
         replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
                             "mapreduce.reduce.java.opts",
                             "-Xmx" + str(mem_per_task_mb) + "m", True)
-
-        replace_in_xml_file(os.path.join(self.temp_conf_dir, YARN_CONF_FILE),
-                            "yarn.resourcemanager.hostname",
-                            self.master.address, True)
-        replace_in_xml_file(os.path.join(self.temp_conf_dir, YARN_CONF_FILE),
-                            "yarn.nodemanager.resource.memory-mb",
-                            str(total_memory_mb), True)
-        replace_in_xml_file(os.path.join(self.temp_conf_dir, YARN_CONF_FILE),
-                            "yarn.nodemanager.resource.cpu-vcores",
-                            str(num_cores - 1), True)
-        replace_in_xml_file(os.path.join(self.temp_conf_dir, YARN_CONF_FILE),
-                            "yarn.scheduler.maximum-allocation-mb",
-                            str(total_memory_mb), True)
-        replace_in_xml_file(os.path.join(self.temp_conf_dir, YARN_CONF_FILE),
-                            "yarn.nodemanager.aux-services",
-                            "mapreduce_shuffle", True)
 
     def bootstrap(self, tar_file):
         """Install Hadoop in all cluster nodes from the specified tar.gz file.

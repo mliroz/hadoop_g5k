@@ -282,14 +282,13 @@ class SparkCluster(object):
         else:
             logger.error("Hosts in the cluster must be specified either"
                          "directly or indirectly through a Hadoop cluster.")
-            raise SparkException("Hosts in the cluster must be specified either"
-                                 " directly or indirectly through a Hadoop "
-                                 "cluster.")
+            raise SparkException("Hosts in the cluster must be specified "
+                                 "either directly or indirectly through a "
+                                 "Hadoop cluster.")
 
-        
         # Store reference to Hadoop cluster and check if mandatory
         self.hc = hadoop_cluster
-        if not self.hc and mode == YARN_MODE:
+        if not self.hc and self.mode == YARN_MODE:
             logger.error("When using a YARN_MODE mode, a reference to the "
                          "Hadoop cluster should be provided.")
             raise SparkException("When using a YARN_MODE mode, a reference "
@@ -390,7 +389,7 @@ class SparkCluster(object):
         # Set basic configuration
         self._copy_base_conf()
         self._create_master_and_slave_conf()
-        self._configure_servers(self.hosts)
+        self._configure_servers()
 
         self._copy_conf(self.temp_conf_dir, self.hosts)
 
@@ -480,49 +479,60 @@ class SparkCluster(object):
             if not action.ended:
                 action.kill()
 
-    def _configure_servers(self, hosts=None):
+    def _configure_servers(self):
         """Configure servers and host-dependant parameters.
-
-           Args:
-             hosts (list of Host, optional):
-               The list of hosts to take into account in the configuration. If
-               not specified, all the hosts of the Spark cluster are used. The
-               first host of this list is always used as the reference.
         """
 
-        if not hosts:
-            hosts = self.hosts
+        hosts = self.hosts
 
-        host_attrs = get_host_attributes(hosts[0])
-        num_cores = host_attrs[u'architecture'][u'smt_size']
-        total_memory_mb = (int(host_attrs[u'main_memory'][u'ram_size']) /
-                           (1024 * 1024))
-        memory_per_worker = int(0.75 * total_memory_mb)
-        memory_per_task = int(memory_per_worker / num_cores)
-
-        # Set memory for each worker
+        # spark-env.sh
         command = "cat >> " + self.conf_dir + "/spark-env.sh << EOF\n"
         command += "SPARK_MASTER_PORT=" + str(self.port) + "\n"
-        command += "SPARK_WORKER_MEMORY=" + str(memory_per_worker) + "m\n"
         command += "EOF\n"
         action = Remote(command, self.hosts)
         action.run()
 
         # Default parameters
-        driver_mem = "1g"
-        executor_mem = str(memory_per_task) + "m"
-
         with open(self.temp_conf_dir + "/spark-defaults.conf", "a") \
                 as defaults_file:
-            defaults_file.write("spark.executor.memory\t" + executor_mem + "\n")
-            defaults_file.write("spark.driver.memory\t" + driver_mem + "\n")
-            # defaults_file.write("spark.driver.maxResultSize\t1g\n")
-            defaults_file.write("spark.logConf\ttrue\n")
-            # defaults_file.write("spark.python.worker.memory\t512m")
+
+            # Common configuration
             if self.evs_log_dir:
                 defaults_file.write("spark.eventLog.enabled\ttrue\n")
                 defaults_file.write("spark.eventLog.dir\t" +
                                     self.evs_log_dir + "\n")
+            defaults_file.write("spark.logConf\ttrue\n")
+
+            # defaults_file.write("spark.driver.memory\t1g\n")
+            # defaults_file.write("spark.driver.maxResultSize\t1g\n")
+            # defaults_file.write("spark.driver.cores\t1\n")
+
+            # If YARN (STANDALONE is good with defaults)
+            if self.mode == YARN_MODE:
+
+                host_attrs = get_host_attributes(hosts[0])
+                num_cores = host_attrs[u'architecture'][u'smt_size']
+                num_hosts = len(self.hosts)
+
+                # TODO: get from YARN
+                available_memory = (int(host_attrs[u'main_memory'][u'ram_size']) /
+                                    (1024 * 1024))
+                total_containers_mem_mb = min(available_memory - 2 * 1024,
+                                              int(0.75 * available_memory))
+
+                cores_per_executor = max(1, min(5, num_cores - 1))
+                executors_per_node = max(1, (num_cores - 1) / cores_per_executor)
+                mem_overhead = 0.1
+                executor_mem = (total_containers_mem_mb / executors_per_node)
+                executor_mem -= int(executor_mem * mem_overhead)
+                num_executors = num_hosts * executors_per_node
+
+                defaults_file.write("spark.executor.cores\t" +
+                                    str(cores_per_executor) + "\n")
+                defaults_file.write("spark.executor.memory\t" +
+                                    str(executor_mem) + "\n")
+                defaults_file.write("spark.executor.instances\t" +
+                                    str(num_executors) + "\n")
 
     def start(self):
         """Start spark processes."""
