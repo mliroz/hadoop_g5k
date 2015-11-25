@@ -12,10 +12,11 @@ from execo.action import Put, TaktukPut, Get, Remote, TaktukRemote, \
     SequentialActions
 from execo.process import SshProcess
 from execo_engine import logger
-from execo_g5k.api_utils import get_host_attributes, get_host_cluster
+from execo_g5k.api_utils import get_host_cluster
 
 from hadoop_g5k.objects import HadoopJarJob, HadoopTopology, HadoopException
-from hadoop_g5k.util import ColorDecorator, replace_in_xml_file, get_xml_params
+from hadoop_g5k.util import ColorDecorator, replace_in_xml_file, get_xml_params, \
+    G5kPhysicalCluster
 
 # Configuration files
 CORE_CONF_FILE = "core-site.xml"
@@ -126,13 +127,18 @@ class HadoopCluster(object):
         self.topology = HadoopTopology(hosts, topo_list)
 
         # Store cluster information
-        self.host_clusters = {}
+        host_clusters = {}
         for h in self.hosts:
             g5k_cluster = get_host_cluster(h)
-            if g5k_cluster in self.host_clusters:
-                self.host_clusters[g5k_cluster].append(h)
+            if g5k_cluster in host_clusters:
+                host_clusters[g5k_cluster].append(h)
             else:
-                self.host_clusters[g5k_cluster] = [h]
+                host_clusters[g5k_cluster] = [h]
+
+        self.clusters = {}
+        for (cluster, cluster_hosts) in host_clusters.items():
+            self.clusters[cluster] = G5kPhysicalCluster(cluster, cluster_hosts)
+        self.master_cluster = self.clusters[get_host_cluster(self.master)]
 
         # Create a string to display the topology
         t = {v: [] for v in self.topology.topology.values()}
@@ -233,7 +239,7 @@ class HadoopCluster(object):
         else:
             return True
 
-    def initialize(self):
+    def initialize(self, default_tuning=False):
         """Initialize the cluster: copy base configuration and format DFS."""
 
         self._pre_initialize()
@@ -246,9 +252,9 @@ class HadoopCluster(object):
         self.topology.create_files(self.temp_conf_dir)
 
         # Configure hosts depending on resource type
-        for g5k_cluster in self.host_clusters:
-            hosts = self.host_clusters[g5k_cluster]
-            self._configure_servers(hosts)
+        for cluster in self.clusters.values():
+            hosts = cluster.get_hosts()
+            self._configure_servers(cluster, default_tuning)
             self._copy_conf(self.temp_conf_dir, hosts)
 
         # Format HDFS
@@ -325,24 +331,21 @@ class HadoopCluster(object):
             raise HadoopNotInitializedException(
                 "The cluster should be initialized")
 
-    def _configure_servers(self, hosts=None):
+    def _configure_servers(self, cluster=None, default_tuning=False):
         """Configure servers and host-dependant parameters.
 
            Args:
-             hosts (list of Host, optional):
-               The list of hosts to take into account in the configuration. If
-               not specified, all the hosts of the Hadoop cluster are used. The
-               first host of this list is always used as the reference.
+             cluster (PhysicalCluster, optional):
+               The PhysicalCluster object to take into account in the
+               configuration. If not specified, the physical cluster of the
+               master is considered.
+             default_tuning (bool, optional):
+               Whether to use automatic tuning based on some best practices or
+               leave the default parameters.
         """
 
-        if not hosts:
-            hosts = self.hosts
-
-        host_attrs = get_host_attributes(hosts[0])
-        num_cores = host_attrs[u'architecture'][u'smt_size']
-        total_memory_mb = (int(host_attrs[u'main_memory'][u'ram_size']) /
-                           (1024 * 1024)) - 2 * 1024
-        mem_per_slot_mb = total_memory_mb / (num_cores - 1)
+        if not cluster:
+            cluster = self.master_cluster
 
         replace_in_xml_file(os.path.join(self.temp_conf_dir, CORE_CONF_FILE),
                             "fs.default.name",
@@ -360,18 +363,29 @@ class HadoopCluster(object):
                             "mapred.job.tracker",
                             self.master.address + ":" +
                             str(self.mapred_port), True)
-        replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
-                            "mapred.tasktracker.map.tasks.maximum",
-                            str(num_cores - 1), True)
-        replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
-                            "mapred.tasktracker.reduce.tasks.maximum",
-                            str(num_cores - 1), True)
-        if mem_per_slot_mb <= 0:
-            logger.warn("Memory is negative, no setting")
-        else:
+
+        if default_tuning:
+            logger.info("Default tuning. Beware that this configuration is not"
+                        " guaranteed to be optimal for all scenarios.")
+            num_cores = cluster.get_num_cores()
+            total_memory_mb = cluster.get_memory() - 2 * 1024
+            mem_per_slot_mb = max(200, total_memory_mb / (num_cores - 1))
+
+            replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
+                                "mapred.tasktracker.map.tasks.maximum",
+                                str(num_cores - 1),
+                                create_if_absent=True,
+                                replace_if_present=False)
+            replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
+                                "mapred.tasktracker.reduce.tasks.maximum",
+                                str(num_cores - 1),
+                                create_if_absent=True,
+                                replace_if_present=False)
             replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
                                 "mapred.child.java.opts",
-                                "-Xmx" + str(mem_per_slot_mb) + "m", True)
+                                "-Xmx" + str(mem_per_slot_mb) + "m",
+                                create_if_absent=True,
+                                replace_if_present=False)
 
     def _copy_conf(self, conf_dir, hosts=None):
         """Copy configuration files from given dir to remote dir in cluster
@@ -409,8 +423,8 @@ class HadoopCluster(object):
             The parameters to be changed in the form key:value.
         """
 
-        for g5k_cluster in self.host_clusters:
-            hosts = self.host_clusters[g5k_cluster]
+        for cluster in self.clusters:
+            hosts = self.clusters[cluster].get_hosts()
 
             # Copy conf files from first host in the cluster
             action = Remote("ls " + self.conf_dir + "/*.xml", [hosts[0]])
@@ -549,6 +563,8 @@ class HadoopCluster(object):
             logger.warn("Error while starting HDFS")
         else:
             self.running_dfs = True
+            if self.running_map_reduce:
+                self.running = True
 
     def start_map_reduce(self):
         """Start the JobTracker and TaskTrackers."""
@@ -568,6 +584,8 @@ class HadoopCluster(object):
             logger.info("MapReduce started successfully")
         else:
             self.running_map_reduce = True
+            if self.running_dfs:
+                self.running = True
 
     def start_map_reduce_and_wait(self):
         """Start the JobTracker and TaskTrackers and wait for exiting safemode.
@@ -905,4 +923,10 @@ class HadoopCluster(object):
         proc.run()
         version = proc.stdout.splitlines()[0]
         return version
+
+    def get_major_version(self):
+        str_version = self.get_version()
+
+        match = re.match('Hadoop ([0-9]).*', str_version)
+        return int(match.group(1))
 

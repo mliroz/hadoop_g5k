@@ -6,7 +6,6 @@ import tempfile
 from execo import Get, Remote
 from execo.process import SshProcess
 from execo_engine import logger
-from execo_g5k import get_host_attributes
 
 from hadoop_g5k.cluster import HadoopCluster
 from hadoop_g5k.util import replace_in_xml_file
@@ -102,24 +101,25 @@ class HadoopV2Cluster(HadoopCluster):
         action = Get([self.master], remote_missing_files, self.temp_conf_dir)
         action.run()
 
-    def _configure_servers(self, hosts=None):
+    def _configure_servers(self, cluster=None, default_tuning=False):
         """Configure servers and host-dependant parameters.
 
            Args:
-             hosts (list of Host, optional):
-               The list of hosts to take into account in the configuration. If
-               not specified, all the hosts of the Hadoop cluster are used. The
-               first host of this list is always used as the reference.
+             cluster (PhysicalCluster, optional):
+               The PhysicalCluster object to take into account in the
+               configuration. If not specified, the physical cluster of the
+               master is considered.
+             default_tuning (bool, optional):
+               Whether to use automatic tuning based on some best practices or
+               leave the default parameters.
         """
 
-        if not hosts:
-            hosts = self.hosts
+        if not cluster:
+            cluster = self.master_cluster
 
         # Node variables
-        host_attrs = get_host_attributes(hosts[0])
-        num_cores = host_attrs[u'architecture'][u'smt_size']
-        available_memory = (int(host_attrs[u'main_memory'][u'ram_size']) /
-                            (1024 * 1024))
+        num_cores = cluster.get_num_cores()
+        available_mem = cluster.get_memory()
 
         # General and HDFS
         replace_in_xml_file(os.path.join(self.temp_conf_dir, CORE_CONF_FILE),
@@ -135,47 +135,102 @@ class HadoopV2Cluster(HadoopCluster):
                             self.conf_dir + "/topo.sh", True)
 
         # YARN
-        total_containers_mem_mb = min(available_memory - 2 * 1024,
-                                      int(0.75 * available_memory))
-        max_container_mem_mb = total_containers_mem_mb
+        # - RM memory: 75% of node memory
+        # - RM cores: # node cores - 1
+        # - Container:
+        #   * Max memory = RM memory
+        #   * Max cores = RM cores
+
+        total_conts_mem_mb = min(available_mem - 2 * 1024,
+                                      int(0.75 * available_mem))
+        max_cont_mem_mb = total_conts_mem_mb
 
         replace_in_xml_file(os.path.join(self.temp_conf_dir, YARN_CONF_FILE),
                             "yarn.resourcemanager.hostname",
                             self.master.address, True)
+
         replace_in_xml_file(os.path.join(self.temp_conf_dir, YARN_CONF_FILE),
                             "yarn.nodemanager.resource.memory-mb",
-                            str(total_containers_mem_mb), True)
+                            str(total_conts_mem_mb), True)
         replace_in_xml_file(os.path.join(self.temp_conf_dir, YARN_CONF_FILE),
                             "yarn.nodemanager.resource.cpu-vcores",
-                            str(num_cores - 1), True)
+                            str(num_cores), True)
+
         replace_in_xml_file(os.path.join(self.temp_conf_dir, YARN_CONF_FILE),
                             "yarn.scheduler.maximum-allocation-mb",
-                            str(max_container_mem_mb), True)
+                            str(max_cont_mem_mb), True)
+        replace_in_xml_file(os.path.join(self.temp_conf_dir, YARN_CONF_FILE),
+                            "yarn.scheduler.maximum-allocation-vcores",
+                            str(num_cores), True)
+
         replace_in_xml_file(os.path.join(self.temp_conf_dir, YARN_CONF_FILE),
                             "yarn.nodemanager.aux-services",
                             "mapreduce_shuffle", True)
 
-        # MapReduce
-        mem_per_task_mb = total_containers_mem_mb / (num_cores - 1)
+        # yarn.sharedcache.enabled
 
+        # MapReduce
         replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
                             "mapreduce.framework.name", "yarn", True)
-        replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
-                            "mapreduce.map.memory.mb",
-                            str(mem_per_task_mb), True)
-        replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
-                            "mapreduce.map.java.opts",
-                            "-Xmx" + str(mem_per_task_mb) + "m", True)
-        replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
-                            "mapreduce.map.cpu.vcores", "1", True)
-        replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
-                            "mapreduce.reduce.memory.mb",
-                            str(mem_per_task_mb), True)
-        replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
-                            "mapreduce.reduce.cpu.vcores", "1", True)
-        replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
-                            "mapreduce.reduce.java.opts",
-                            "-Xmx" + str(mem_per_task_mb) + "m", True)
+
+        if default_tuning:
+            logger.info("Default tuning. Beware that this configuraiton is not"
+                        "guaranteed to be optimal for all scenarios.")
+
+            # Defaults calculations
+            if available_mem < 8:
+                min_cont_mem = 512
+            elif available_mem < 24:
+                min_cont_mem = 1024
+            else:
+                min_cont_mem = 2048
+
+            num_conts = min(int(1.5 * num_cores),
+                            total_conts_mem_mb / min_cont_mem)
+            map_mem = max(min_cont_mem, total_conts_mem_mb / num_conts)
+            red_mem = map_mem * 2
+            map_java_heap = int(map_mem * 0.8)
+            red_java_heap = int(red_mem * 0.8)
+
+            io_sort_mb = max(100, map_java_heap / 2)
+            io_sort_factor = max(10, io_sort_mb / 10)
+
+            # Memory and core settings
+            replace_in_xml_file(os.path.join(self.temp_conf_dir, YARN_CONF_FILE),
+                                "yarn.scheduler.minimum-allocation-mb",
+                                str(min_cont_mem), True)
+
+            replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
+                                "mapreduce.map.memory.mb",
+                                str(map_mem), True)
+            replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
+                                "mapreduce.map.java.opts",
+                                "-Xmx" + str(map_java_heap) + "m", True)
+            replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
+                                "mapreduce.map.cpu.vcores", "1", True)
+            replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
+                                "mapreduce.reduce.memory.mb",
+                                str(red_mem), True)
+            replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
+                                "mapreduce.reduce.java.opts",
+                                "-Xmx" + str(red_java_heap) + "m", True)
+            replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
+                                "mapreduce.reduce.cpu.vcores", "1", True)
+
+            # Note:
+            # If scheduler.capacity.resource-calculator is not set to
+            # org.apache.hadoop.yarn.util.resource.DominantResourceCalculator
+            # CPU scheduling is not enabled
+
+            # Shuffle
+            replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
+                                "mapreduce.map.output.compress", "true", True)
+            replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
+                                "mapreduce.task.io.sort.mb",
+                                str(io_sort_mb), True)
+            replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
+                                "mapreduce.task.io.sort.factor",
+                                str(io_sort_factor), True)
 
     def bootstrap(self, tar_file):
         """Install Hadoop in all cluster nodes from the specified tar.gz file.
@@ -225,6 +280,11 @@ class HadoopV2Cluster(HadoopCluster):
 
         self.running = True
 
+    def start_dfs_and_wait(self):
+        super(HadoopV2Cluster, self).start_dfs_and_wait()
+        if self.running_yarn:
+            self.running = True
+
     def start_yarn(self):
         """Start the YARN ResourceManager and NodeManagers."""
 
@@ -238,7 +298,10 @@ class HadoopV2Cluster(HadoopCluster):
         if not proc.finished_ok:
             logger.warn("Error while starting YARN")
         else:
+            #TODO: get success or not from super.
             self.running_yarn = True
+            if self.running_dfs:
+                self.running = True
 
     def start_map_reduce(self):
         """Do nothing. MapReduce has no specific service in Hadoop 2.*"""

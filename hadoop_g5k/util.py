@@ -3,11 +3,14 @@ import re
 import shutil
 import tempfile
 
+from abc import ABCMeta, abstractmethod
+
 from execo.action import Remote
 from execo.host import Host
 from execo.log import style
 from execo_engine import logger
-from execo_g5k import get_oar_job_nodes, get_oargrid_job_nodes
+from execo_g5k import get_oar_job_nodes, get_oargrid_job_nodes, \
+    get_host_attributes
 
 
 # Imports #####################################################################
@@ -145,6 +148,45 @@ def generate_hosts(hosts_input):
     return hosts
 
 
+# Cluster info ################################################################
+
+class PhysicalCluster(object):
+
+    def __init__(self, name, hosts):
+        self._name = name
+        self._hosts = hosts
+
+    def get_name(self):
+        return self._name
+
+    def get_hosts(self):
+        return self._hosts
+
+    @abstractmethod
+    def get_memory(self):
+        pass
+
+    @abstractmethod
+    def get_num_cores(self):
+        pass
+
+
+class G5kPhysicalCluster(PhysicalCluster):
+
+    def __init__(self, name, hosts):
+        super(G5kPhysicalCluster, self).__init__(name, hosts)
+
+        host_attrs = get_host_attributes(hosts[0])
+        self._num_cores = host_attrs[u'architecture'][u'smt_size']
+        self._memory = host_attrs[u'main_memory'][u'ram_size'] / (1024 * 1024)
+
+    def get_memory(self):
+        return self._memory
+
+    def get_num_cores(self):
+        return self._num_cores
+
+
 # Output formatting ###########################################################
 
 class ColorDecorator(object):
@@ -176,7 +218,8 @@ def __replace_line(line, value):
                   r'</value>\g<2>', line)
 
 
-def replace_in_xml_file(f, name, value, create_if_absent=False):
+def replace_in_xml_file(f, name, value,
+                        create_if_absent=False, replace_if_present=True):
     """Assign the given value to variable name in xml file f.
 
     Args:
@@ -189,6 +232,9 @@ def replace_in_xml_file(f, name, value, create_if_absent=False):
       create_if_absent (bool, optional):
         If True, the variable will be created at the end of the file in case
         it was not already present.
+      replace_if_present (bool, optional):
+        If True, the current value will be replaced; otherwise, the current
+        value will be maintained and the specified value ignored .
 
     Returns (bool):
       True if the assignment has been made, False otherwise.
@@ -203,18 +249,21 @@ def replace_in_xml_file(f, name, value, create_if_absent=False):
     line = inf.readline()
     while line != "":
         if "<name>" + name + "</name>" in line:
-            if "<value>" in line:
-                outf.write(__replace_line(line, value))
-                changed = True
-            else:
-                outf.write(line)
-                line = inf.readline()
-                if line != "":
+            if replace_if_present:
+                if "<value>" in line:
                     outf.write(__replace_line(line, value))
                     changed = True
                 else:
-                    logger.error("Configuration file " + f +
-                                 " is not correctly formatted")
+                    outf.write(line)
+                    line = inf.readline()
+                    if line != "":
+                        outf.write(__replace_line(line, value))
+                        changed = True
+                    else:
+                        logger.error("Configuration file " + f +
+                                     " is not correctly formatted")
+            else:
+                return False
         else:
             if ("</configuration>" in line and
                     create_if_absent and not changed):
