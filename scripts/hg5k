@@ -277,7 +277,7 @@ def print_state(section="general"):
         logger.info("-"*55)
 
     elif section == "files":
-        if hc.get_version().startswith("Hadoop 2."):
+        if hc.get_major_version() == 2:
             (stdout, stderr) = hc.execute("fs -ls -R /", verbose=False)
         else:
             (stdout, stderr) = hc.execute("fs -lsr /", verbose=False)
@@ -288,7 +288,7 @@ def print_state(section="general"):
         print ""
 
         size = None
-        if hc.get_version().startswith("Hadoop 2."):
+        if hc.get_major_version() == 2:
             (stdout, stderr) = hc.execute("fs -du -s /", verbose=False)
             for line in stdout.splitlines():
                 if "WARN" not in line and "warning" not in line:
@@ -334,11 +334,89 @@ def print_state(section="general"):
         print stdout
         print ""
 
+
+def putindfs(hc, action_args):
+    local_paths = action_args[:-1]
+    dest = action_args[-1]
+
+    for f in local_paths:
+        if not os.path.exists(f):
+            logger.error("Local path " + f + " does not exist")
+            sys.exit(os.EX_NOINPUT)
+
+    # Create dest directories if needed
+    if hc.get_major_version() == 2:
+        hc.execute("fs -mkdir -p " + dest, verbose=False)
+
+    # Define and create temp dir
+    tmp_dir = "/tmp/hg5k_dest"
+    hosts = hc.hosts
+    action_remove = TaktukRemote("rm -rf " + tmp_dir, hosts)
+    action_remove.run()
+    action_create = TaktukRemote("mkdir -p " + tmp_dir, hosts)
+    action_create.run()
+
+    def copy_function(host, files_to_copy):
+        action_copy = Put([host], files_to_copy, tmp_dir)
+        action_copy.run()
+
+        for f in files_to_copy:
+            dest_suffix = os.path.basename(os.path.normpath(f))
+            src_file = os.path.join(tmp_dir, dest_suffix)
+
+            if hc.get_major_version() == 2:
+                hc.execute("fs -put " + src_file + " " + dest,
+                           host, True, False)
+            else:
+                hc.execute("fs -put " + src_file + " " +
+                           os.path.join(dest, dest_suffix),
+                           host, True, False)
+
+    # Assign files to hosts
+    files_per_host = [[]] * len(hosts)
+    for idx in range(0, len(hosts)):
+        files_per_host[idx] = local_paths[idx::len(hosts)]
+
+    # Create threads and launch them
+    logger.info("Copying files in parallel into " + str(len(hosts)) +
+                " hosts")
+
+    threads = []
+    for idx, h in enumerate(hosts):
+        if files_per_host[idx]:
+            t = threading.Thread(target=copy_function,
+                                 args=(h, files_per_host[idx]))
+            t.start()
+            threads.append(t)
+
+    # Wait for the threads to finish
+    for t in threads:
+        t.join()
+
+
+def getfromdfs(hc, action_args):
+    remote_path = action_args[0]
+    local_path = action_args[1]
+
+    tmp_dir = "/tmp"
+    # Remove file in tmp dir if exists
+    proc = SshProcess("rm -rf " +
+                      os.path.join(tmp_dir, os.path.basename(remote_path)),
+                      hc.master)
+    proc.run()
+
+    # Get files in master
+    hc.execute("fs -get " + remote_path + " " + tmp_dir, verbose=False)
+
+    # Copy files from master
+    action = Get([hc.master],
+                 [os.path.join(tmp_dir, os.path.basename(remote_path))],
+                 local_path)
+    action.run()
+
 if __name__ == "__main__":
 
     args = parse_args()
-
-    print args
 
     changed = False
 
@@ -458,9 +536,7 @@ if __name__ == "__main__":
         changed = True
 
     if args.start_mr:
-        version = hc.get_version()
-        if not (version.startswith("Hadoop 0.") or
-                version.startswith("Hadoop 1.")):
+        if hc.get_major_version() >= 2:
             logger.error("MapReduce daemons are only part of Hadoop versions "
                         "0.*. and 1.*")
             sys.exit(os.EX_USAGE)
@@ -468,92 +544,18 @@ if __name__ == "__main__":
         changed = True
 
     if args.start_yarn:
-        version = hc.get_version()
-        if not version.startswith("Hadoop 2."):
+        if hc.get_major_version() != 2:
             logger.error("YARN is only available in Hadoop 2.*")
             sys.exit(os.EX_USAGE)
         hc.start_yarn()
         changed = True
 
     if args.putindfs:
-        local_paths = args.putindfs[:-1]
-        dest = args.putindfs[-1]
-
-        for f in local_paths:
-            if not os.path.exists(f):
-                logger.error("Local path " + f + " does not exist")
-                sys.exit(os.EX_NOINPUT)
-
-        # Create dest directories if needed
-        if hc.get_version().startswith("Hadoop 2."):
-            hc.execute("fs -mkdir -p " + dest, verbose=False)
-
-        # Define and create temp dir
-        tmp_dir = "/tmp/hg5k_dest"
-        hosts = hc.hosts
-        actionRemove = TaktukRemote("rm -rf " + tmp_dir, hosts)
-        actionRemove.run()
-        actionCreate = TaktukRemote("mkdir -p " + tmp_dir, hosts)
-        actionCreate.run()
-
-        def copy_function(host, files_to_copy):
-            action_copy = Put([host], files_to_copy, tmp_dir)
-            action_copy.run()
-
-            for f in files_to_copy:
-                dest_suffix = os.path.basename(os.path.normpath(f))
-                src_file = os.path.join(tmp_dir, dest_suffix)
-
-                if hc.get_version().startswith("Hadoop 2."):
-                    hc.execute("fs -put " + src_file + " " + dest,
-                               host, True, False)
-                else:
-                    hc.execute("fs -put " + src_file + " " +
-                               os.path.join(dest, dest_suffix),
-                               host, True, False)
-
-        # Assign files to hosts
-        files_per_host = [[]] * len(hosts)
-        for idx in range(0, len(hosts)):
-            files_per_host[idx] = local_paths[idx::len(hosts)]
-
-        # Create threads and launch them
-        logger.info("Copying files in parallel into " + str(len(hosts)) +
-                    " hosts")
-
-        threads = []
-        for idx, h in enumerate(hosts):
-            if files_per_host[idx]:
-                t = threading.Thread(target=copy_function,
-                                     args=(h, files_per_host[idx]))
-                t.start()
-                threads.append(t)
-
-        # Wait for the threads to finish
-        for t in threads:
-            t.join()
-
+        putindfs(hc, args.putindfs)
         changed = True
 
     if args.getfromdfs:
-        remote_path = args.getfromdfs[0]
-        local_path = args.getfromdfs[1]
-
-        tmp_dir = "/tmp"
-        # Remove file in tmp dir if exists
-        proc = SshProcess("rm -rf " +
-                          os.path.join(tmp_dir, os.path.basename(remote_path)),
-                          hc.master)
-        proc.run()
-
-        # Get files in master
-        hc.execute("fs -get " + remote_path + " " + tmp_dir, verbose=False)
-
-        # Copy files from master
-        action = Get([hc.master],
-                     [os.path.join(tmp_dir, os.path.basename(remote_path))],
-                     local_path)
-        action.run()
+        getfromdfs(hc, args.getfromdfs)
 
     if args.execute:
         if node_host:
