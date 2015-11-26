@@ -478,7 +478,7 @@ class HadoopCluster(object):
         if not os.path.exists(tmp_dir):
             os.makedirs(tmp_dir)
 
-        action = Get([self.hosts[0]], remote_conf_files, tmp_dir)
+        action = Get([host], remote_conf_files, tmp_dir)
         action.run()
 
         temp_conf_files = [os.path.join(tmp_dir, f) for f in
@@ -486,10 +486,12 @@ class HadoopCluster(object):
 
         return temp_conf_files
 
-    def get_conf_param(self, param_name, default=None):
+    def get_conf_param(self, param_name, default=None, node=None):
 
         # Copy conf files from first host in the cluster
-        temp_conf_files = self._get_conf_files(self.hosts[0])
+        if node is None:
+            node = self.hosts[0]
+        temp_conf_files = self._get_conf_files(node)
 
         # Look in conf files
         for f in temp_conf_files:
@@ -499,13 +501,15 @@ class HadoopCluster(object):
 
         return default
 
-    def get_conf(self, param_names):
+    def get_conf(self, param_names, node=None):
 
         params = {}
         remaining_param_names = set(param_names)
 
         # Copy conf files from first host in the cluster
-        temp_conf_files = self._get_conf_files(self.hosts[0])
+        if node is None:
+            node = self.hosts[0]
+        temp_conf_files = self._get_conf_files(node)
 
         # Look in conf files
         for f in temp_conf_files:
