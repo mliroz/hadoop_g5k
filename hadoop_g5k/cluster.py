@@ -13,10 +13,10 @@ from execo.action import Put, TaktukPut, Get, Remote, TaktukRemote, \
 from execo.process import SshProcess
 from execo_engine import logger
 from execo_g5k.api_utils import get_host_cluster
+from hadoop_g5k.hardware import G5kDeploymentHardware
 
 from hadoop_g5k.objects import HadoopJarJob, HadoopTopology, HadoopException
-from hadoop_g5k.util import ColorDecorator, replace_in_xml_file, get_xml_params, \
-    G5kPhysicalCluster
+from hadoop_g5k.util import ColorDecorator, replace_in_xml_file, get_xml_params
 
 # Configuration files
 CORE_CONF_FILE = "core-site.xml"
@@ -127,18 +127,9 @@ class HadoopCluster(object):
         self.topology = HadoopTopology(hosts, topo_list)
 
         # Store cluster information
-        host_clusters = {}
-        for h in self.hosts:
-            g5k_cluster = get_host_cluster(h)
-            if g5k_cluster in host_clusters:
-                host_clusters[g5k_cluster].append(h)
-            else:
-                host_clusters[g5k_cluster] = [h]
-
-        self.clusters = {}
-        for (cluster, cluster_hosts) in host_clusters.items():
-            self.clusters[cluster] = G5kPhysicalCluster(cluster, cluster_hosts)
-        self.master_cluster = self.clusters[get_host_cluster(self.master)]
+        self.hw = G5kDeploymentHardware()
+        self.hw.add_hosts(self.hosts)
+        self.master_cluster = self.hw.get_cluster(get_host_cluster(self.master))
 
         # Create a string to display the topology
         t = {v: [] for v in self.topology.topology.values()}
@@ -252,7 +243,7 @@ class HadoopCluster(object):
         self.topology.create_files(self.temp_conf_dir)
 
         # Configure hosts depending on resource type
-        for cluster in self.clusters.values():
+        for cluster in self.hw.get_clusters():
             hosts = cluster.get_hosts()
             self._configure_servers(cluster, default_tuning)
             self._copy_conf(self.temp_conf_dir, hosts)
@@ -430,8 +421,8 @@ class HadoopCluster(object):
             parameter if not found. Only applies when conf_file is not set.
         """
 
-        for cluster in self.clusters:
-            hosts = self.clusters[cluster].get_hosts()
+        for cluster in self.hw.get_clusters():
+            hosts = cluster.get_hosts()
 
             # Copy conf files from first host in the cluster
             action = Remote("ls " + self.conf_dir + "/*.xml", [hosts[0]])
@@ -473,13 +464,9 @@ class HadoopCluster(object):
             # Copy back the files to all hosts
             self._copy_conf(tmp_dir, hosts)
 
-    def get_conf(self, param_names):
+    def _get_conf_files(self, host):
 
-        params = {}
-        remaining_param_names = set(param_names)
-
-        # Copy conf files from first host in the cluster
-        action = Remote("ls " + self.conf_dir + "/*.xml", [self.hosts[0]])
+        action = Remote("ls " + self.conf_dir + "/*.xml", [host])
         action.run()
         output = action.processes[0].stdout
 
@@ -494,10 +481,33 @@ class HadoopCluster(object):
         action = Get([self.hosts[0]], remote_conf_files, tmp_dir)
         action.run()
 
-        # Do replacements in temp file
         temp_conf_files = [os.path.join(tmp_dir, f) for f in
                            os.listdir(tmp_dir)]
 
+        return temp_conf_files
+
+    def get_conf_param(self, param_name, default=None):
+
+        # Copy conf files from first host in the cluster
+        temp_conf_files = self._get_conf_files(self.hosts[0])
+
+        # Look in conf files
+        for f in temp_conf_files:
+            fparams = get_xml_params(f, [param_name])
+            if fparams[param_name]:
+                return fparams[param_name]
+
+        return default
+
+    def get_conf(self, param_names):
+
+        params = {}
+        remaining_param_names = set(param_names)
+
+        # Copy conf files from first host in the cluster
+        temp_conf_files = self._get_conf_files(self.hosts[0])
+
+        # Look in conf files
         for f in temp_conf_files:
             fparams = get_xml_params(f, remaining_param_names)
             for p in fparams:

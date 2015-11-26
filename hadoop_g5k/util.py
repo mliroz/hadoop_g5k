@@ -3,14 +3,11 @@ import re
 import shutil
 import tempfile
 
-from abc import ABCMeta, abstractmethod
-
 from execo.action import Remote
 from execo.host import Host
 from execo.log import style
 from execo_engine import logger
-from execo_g5k import get_oar_job_nodes, get_oargrid_job_nodes, \
-    get_host_attributes
+from execo_g5k import get_oar_job_nodes, get_oargrid_job_nodes
 
 
 # Imports #####################################################################
@@ -146,45 +143,6 @@ def generate_hosts(hosts_input):
                  ' '.join(style.host(host.address.split('.')[0])
                           for host in hosts))
     return hosts
-
-
-# Cluster info ################################################################
-
-class PhysicalCluster(object):
-
-    def __init__(self, name, hosts):
-        self._name = name
-        self._hosts = hosts
-
-    def get_name(self):
-        return self._name
-
-    def get_hosts(self):
-        return self._hosts
-
-    @abstractmethod
-    def get_memory(self):
-        pass
-
-    @abstractmethod
-    def get_num_cores(self):
-        pass
-
-
-class G5kPhysicalCluster(PhysicalCluster):
-
-    def __init__(self, name, hosts):
-        super(G5kPhysicalCluster, self).__init__(name, hosts)
-
-        host_attrs = get_host_attributes(hosts[0])
-        self._num_cores = host_attrs[u'architecture'][u'smt_size']
-        self._memory = host_attrs[u'main_memory'][u'ram_size'] / (1024 * 1024)
-
-    def get_memory(self):
-        return self._memory
-
-    def get_num_cores(self):
-        return self._num_cores
 
 
 # Output formatting ###########################################################
