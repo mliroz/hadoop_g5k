@@ -144,14 +144,8 @@ def parse_args():
     actions.add_argument("--changeconf",
                          action="store",
                          nargs="+",
-                         metavar="NAME=VALUE",
+                         metavar=("[CONF_FILE] NAME=VALUE", "NAME=VALUE"),
                          help="Change given configuration variables")
-
-    actions.add_argument("--getconf",
-                         action="store",
-                         nargs="+",
-                         metavar="PARAM_NAME",
-                         help="Get the values of the specified variables")
 
     start_mutex_group = actions.add_mutually_exclusive_group()
 
@@ -230,7 +224,8 @@ def parse_args():
                          action="store",
                          nargs="?",
                          const="general",
-                         metavar="general | files | dfs | dfsblocks | mrjobs",
+                         choices=["general", "files", "dfs",
+                                  "dfsblocks", "mrjobs"],
                          help="Show the cluster state. The output depends on "
                          "optional argument:\n"
                          "  general    Show general cluster state"
@@ -239,6 +234,12 @@ def parse_args():
                          "  dfs        Show filesystem state\n" +
                          "  dfsblocks  Show dfs blocks information\n" +
                          "  mrjobs     Show mapreduce state\n")
+
+    queries.add_argument("--getconf",
+                         action="store",
+                         nargs="+",
+                         metavar="PARAM_NAME",
+                         help="Get the values of the specified variables")
 
     return parser.parse_args()
 
@@ -514,12 +515,23 @@ if __name__ == "__main__":
         changed = True
 
     if args.changeconf:
+        if "=" in args.changeconf[0]:
+            conf_file = None
+            list_params = args.changeconf
+        else:
+            conf_file = args.changeconf[0]
+            list_params = args.changeconf[1:]
+
         params = {}
-        for assig in args.changeconf:
+        for assig in list_params:
             parts = assig.split("=")
             params[parts[0]] = parts[1]
 
-        hc.change_conf(params)
+        if conf_file:
+            hc.change_conf(params, conf_file=conf_file)
+        else:
+            hc.change_conf(params)
+
         changed = True
 
     if args.getconf:

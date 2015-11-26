@@ -412,7 +412,7 @@ class HadoopCluster(object):
             if not action.ended:
                 action.kill()
 
-    def change_conf(self, params):
+    def change_conf(self, params, conf_file=None, default_file=MR_CONF_FILE):
         """Modify Hadoop configuration. This method copies the configuration
         files from the first host of each g5k cluster conf dir into a local
         temporary dir, do all the changes in place and broadcast the new
@@ -421,6 +421,13 @@ class HadoopCluster(object):
         Args:
           params (dict of str:str):
             The parameters to be changed in the form key:value.
+          conf_file (str, optional):
+            The file where parameters should be set. If not specified, all
+            files are checked for the parameter name and the parameter is set
+            in the file where the property is found. If not found, the
+            parameter is set in the default file.
+          default_file (str, optional): The default conf file where to set the
+            parameter if not found. Only applies when conf_file is not set.
         """
 
         for cluster in self.clusters:
@@ -443,17 +450,25 @@ class HadoopCluster(object):
             action.run()
 
             # Do replacements in temp file
-            temp_conf_files = [os.path.join(tmp_dir, f) for f in
-                               os.listdir(tmp_dir)]
-
-            for name, value in params.iteritems():
-                for f in temp_conf_files:
-                    if replace_in_xml_file(f, name, value):
-                        break
-                else:
-                    # Property not found - provisionally add it in MR_CONF_FILE
-                    f = os.path.join(tmp_dir, MR_CONF_FILE)
+            if conf_file:
+                f = os.path.join(tmp_dir, conf_file)
+                for name, value in params.iteritems():
                     replace_in_xml_file(f, name, value, True)
+            else:
+                temp_conf_files = [os.path.join(tmp_dir, f) for f in
+                                   os.listdir(tmp_dir)]
+
+                for name, value in params.iteritems():
+                    for f in temp_conf_files:
+                        if replace_in_xml_file(f, name, value):
+                            break
+                    else:
+                        # Property not found - add it in MR_CONF_FILE
+                        logger.info("Parameter with name " + name + " has not "
+                                    "been found in any conf file. Setting it "
+                                    "in " + default_file)
+                        f = os.path.join(tmp_dir, default_file)
+                        replace_in_xml_file(f, name, value, True)
 
             # Copy back the files to all hosts
             self._copy_conf(tmp_dir, hosts)

@@ -289,7 +289,7 @@ def get_xml_params(f, param_names):
     if not param_names:
         return {}
 
-    local_param_names = param_names[:]
+    local_param_names = list(param_names)
 
     params = {}
     for name in local_param_names:
