@@ -210,48 +210,60 @@ def replace_in_xml_file(f, name, value,
       True if the assignment has been made, False otherwise.
     """
 
-    changed = False
+    current_value = read_in_xml_file(f, name)
 
-    (_, temp_file) = tempfile.mkstemp("", "xmlf-", "/tmp")
+    print "current_value", current_value
 
-    inf = open(f)
-    outf = open(temp_file, "w")
-    line = inf.readline()
-    while line != "":
-        if "<name>" + name + "</name>" in line:
-            if replace_if_present:
+    if current_value:
+        if replace_if_present:
+            (_, temp_file) = tempfile.mkstemp("", "xmlf-", "/tmp")
+            with open(f) as in_file, open(temp_file, "w") as out_file:
+
+                # Search property (we know it exists)
+                line = in_file.readline()
+                while "<name>" + name + "</name>" not in line:
+                    out_file.write(line)
+                    line = in_file.readline()
+
+                # Replace with new value
                 if "<value>" in line:
-                    outf.write(__replace_line(line, value))
-                    changed = True
+                    out_file.write(__replace_line(line, value))
                 else:
-                    outf.write(line)
-                    line = inf.readline()
-                    if line != "":
-                        outf.write(__replace_line(line, value))
-                        changed = True
-                    else:
-                        logger.error("Configuration file " + f +
-                                     " is not correctly formatted")
-            else:
-                return False
+                    out_file.write(line)
+                    line = in_file.readline()
+                    out_file.write(__replace_line(line, value))
+
+                # changed = True
+
+                # Write the rest of the file
+                line = in_file.readline()
+                while line != "":
+                    out_file.write(line)
+                    line = in_file.readline()
+
         else:
-            if ("</configuration>" in line and
-                    create_if_absent and not changed):
-                outf.write("  <property><name>" + name + "</name>" +
+            return False
+    else:
+        if create_if_absent:
+            (_, temp_file) = tempfile.mkstemp("", "xmlf-", "/tmp")
+            with open(f) as in_file, open(temp_file, "w") as out_file:
+
+                # Search end of file
+                line = in_file.readline()
+                while "</configuration>" not in line:
+                    out_file.write(line)
+                    line = in_file.readline()
+                out_file.write("  <property><name>" + name + "</name>" +
                            "<value>" + str(value) + "</value></property>\n")
-                outf.write(line)
-                changed = True
-            else:
-                outf.write(line)
-        line = inf.readline()
-    inf.close()
-    outf.close()
+                out_file.write(line)
+                # changed = True
 
-    if changed:
-        shutil.copyfile(temp_file, f)
+        else:
+            return False
+
+    shutil.copyfile(temp_file, f)
     os.remove(temp_file)
-
-    return changed
+    return True
 
 
 def get_xml_params(f, param_names):
