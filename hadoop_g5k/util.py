@@ -3,6 +3,8 @@ import re
 import shutil
 import tempfile
 
+import xml.etree.ElementTree as ET
+
 from execo.action import Remote
 from execo.host import Host
 from execo.log import style
@@ -164,6 +166,16 @@ class ColorDecorator(object):
 
 
 # Configuration functions #####################################################
+
+def read_in_xml_file(f, name, default=None):
+    tree = ET.parse(f)
+    root = tree.getroot()
+    res = root.findall("./property/[name='%s']/value" % name)
+    if res:
+        return res[0].text
+    else:
+        return default
+
 
 def create_xml_file(f):
     with open(f, "w") as fout:
