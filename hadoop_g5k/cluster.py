@@ -100,7 +100,7 @@ class HadoopCluster(object):
             The path of the config file to be used.
         """
 
-        # Load cluster properties
+        # Load properties
         config = ConfigParser(self.defaults)
         config.add_section("cluster")
         config.add_section("local")
@@ -108,13 +108,20 @@ class HadoopCluster(object):
         if config_file:
             config.readfp(open(config_file))
 
+        # Deployment properties
+        self.local_base_conf_dir = config.get("local", "local_base_conf_dir")
+        self.init_conf_dir = tempfile.mkdtemp("", "hadoop-init-", "/tmp")
+        self.conf_mandatory_files = [CORE_CONF_FILE,
+                                     HDFS_CONF_FILE,
+                                     MR_CONF_FILE]
+
+        # Node properties
         self.base_dir = config.get("cluster", "hadoop_base_dir")
         self.conf_dir = config.get("cluster", "hadoop_conf_dir")
         self.logs_dir = config.get("cluster", "hadoop_logs_dir")
         self.hadoop_temp_dir = config.get("cluster", "hadoop_temp_dir")
         self.hdfs_port = config.getint("cluster", "hdfs_port")
         self.mapred_port = config.getint("cluster", "mapred_port")
-        self.local_base_conf_dir = config.get("local", "local_base_conf_dir")
 
         self.bin_dir = self.base_dir + "/bin"
         self.sbin_dir = self.base_dir + "/bin"
@@ -215,13 +222,46 @@ class HadoopCluster(object):
         action = Remote(command, self.hosts)
         action.run()
 
-        # 5. Check version
-        return self._check_version_compliance()
+        # 5. Check version (cannot do it before)
+        if not self._check_version_compliance():
+            return False
+
+        # 6. Generate initial configuration
+        self._initialize_conf()
+
+        return True
+
+    def _initialize_conf(self):
+        """Merge locally-specified configuration files with default files
+        from the distribution."""
+
+        if os.path.exists(self.local_base_conf_dir):
+            base_conf_files = [os.path.join(self.local_base_conf_dir, f)
+                               for f in os.listdir(self.local_base_conf_dir)]
+            for f in base_conf_files:
+                shutil.copy(f, self.init_conf_dir)
+        else:
+            logger.warn(
+                "Local conf dir does not exist. Using default configuration")
+            base_conf_files = []
+
+        missing_conf_files = self.conf_mandatory_files
+        for f in base_conf_files:
+            f_base_name = os.path.basename(f)
+            if f_base_name in missing_conf_files:
+                missing_conf_files.remove(f_base_name)
+
+        logger.info("Copying missing conf files from master: " + str(
+            missing_conf_files))
+
+        remote_missing_files = [os.path.join(self.conf_dir, f)
+                                for f in missing_conf_files]
+
+        action = Get([self.master], remote_missing_files, self.init_conf_dir)
+        action.run()
 
     def _check_version_compliance(self):
-        version = self.get_version()
-        if not (version.startswith("Hadoop 0.") or
-                version.startswith("Hadoop 1.")):
+        if self.get_major_version() >= 2:
             logger.error("Version of HadoopCluster is not compliant with the "
                          "distribution provided in the bootstrap option. Use "
                          "the appropriate parameter for --version when "
@@ -229,6 +269,20 @@ class HadoopCluster(object):
             return False
         else:
             return True
+
+    def _check_initialization(self):
+        """ Check whether the cluster is initialized and raise and exception if
+        not.
+
+        Raises:
+          HadoopNotInitializedException:
+            If self.initialized = False
+        """
+
+        if not self.initialized:
+            logger.error("The cluster should be initialized")
+            raise HadoopNotInitializedException(
+                "The cluster should be initialized")
 
     def initialize(self, default_tuning=False):
         """Initialize the cluster: copy base configuration and format DFS."""
@@ -238,15 +292,15 @@ class HadoopCluster(object):
         logger.info("Initializing hadoop")
 
         # Set basic configuration
-        self._copy_base_conf()
-        self._create_master_and_slave_conf()
-        self.topology.create_files(self.temp_conf_dir)
+        temp_conf_base_dir = tempfile.mkdtemp("", "hadoop-", "/tmp")
+        temp_conf_dir = os.path.join(temp_conf_base_dir, "conf")
+        shutil.copytree(self.init_conf_dir, temp_conf_dir)
 
-        # Configure hosts depending on resource type
-        for cluster in self.hw.get_clusters():
-            hosts = cluster.get_hosts()
-            self._configure_servers(cluster, default_tuning)
-            self._copy_conf(self.temp_conf_dir, hosts)
+        self._create_master_and_slave_conf(temp_conf_dir)
+        self.topology.create_files(temp_conf_dir)
+        self._configure_servers(temp_conf_dir, default_tuning)
+
+        shutil.rmtree(temp_conf_base_dir)
 
         # Format HDFS
         self.format_dfs()
@@ -265,116 +319,173 @@ class HadoopCluster(object):
 
         self.initialized = False
 
-    def _copy_base_conf(self):
-        """Copy base configuration files to tmp dir."""
-
-        self.temp_conf_dir = tempfile.mkdtemp("", "hadoop-", "/tmp")
-        if os.path.exists(self.local_base_conf_dir):
-            base_conf_files = [os.path.join(self.local_base_conf_dir, f)
-                               for f in os.listdir(self.local_base_conf_dir)]
-            for f in base_conf_files:
-                shutil.copy(f, self.temp_conf_dir)
-        else:
-            logger.warn(
-                "Local conf dir does not exist. Using default configuration")
-            base_conf_files = []
-
-        mandatory_files = [CORE_CONF_FILE, HDFS_CONF_FILE, MR_CONF_FILE]
-
-        missing_conf_files = mandatory_files
-        for f in base_conf_files:
-            f_base_name = os.path.basename(f)
-            if f_base_name in missing_conf_files:
-                missing_conf_files.remove(f_base_name)
-
-        logger.info("Copying missing conf files from master: " + str(
-            missing_conf_files))
-
-        remote_missing_files = [os.path.join(self.conf_dir, f)
-                                for f in missing_conf_files]
-
-        action = Get([self.master], remote_missing_files, self.temp_conf_dir)
-        action.run()
-
-    def _create_master_and_slave_conf(self):
+    def _create_master_and_slave_conf(self, conf_dir):
         """Create master and slaves configuration files."""
 
-        master_file = open(self.temp_conf_dir + "/masters", "w")
-        master_file.write(self.master.address + "\n")
-        master_file.close()
+        with open(conf_dir + "/masters", "w") as master_file:
+            master_file.write(self.master.address + "\n")
 
-        slaves_file = open(self.temp_conf_dir + "/slaves", "w")
-        for s in self.hosts:
-            slaves_file.write(s.address + "\n")
-        slaves_file.close()
+        with open(conf_dir + "/slaves", "w") as slaves_file:
+            for s in self.hosts:
+                slaves_file.write(s.address + "\n")
 
-    def _check_initialization(self):
-        """ Check whether the cluster is initialized and raise and exception if
-        not.
-        
-        Raises:
-          HadoopNotInitializedException:
-            If self.initialized = False
-        """
-
-        if not self.initialized:
-            logger.error("The cluster should be initialized")
-            raise HadoopNotInitializedException(
-                "The cluster should be initialized")
-
-    def _configure_servers(self, cluster=None, default_tuning=False):
+    def _configure_servers(self, conf_dir, default_tuning=False):
         """Configure servers and host-dependant parameters.
 
            Args:
-             cluster (PhysicalCluster, optional):
-               The PhysicalCluster object to take into account in the
-               configuration. If not specified, the physical cluster of the
-               master is considered.
+             conf_dir (str):
+               The path of the directory with the configuration files.
              default_tuning (bool, optional):
                Whether to use automatic tuning based on some best practices or
                leave the default parameters.
         """
 
-        if not cluster:
-            cluster = self.master_cluster
-
-        replace_in_xml_file(os.path.join(self.temp_conf_dir, CORE_CONF_FILE),
-                            "fs.default.name",
-                            "hdfs://" + self.master.address + ":" +
-                                        str(self.hdfs_port) + "/",
-                            True)
-        replace_in_xml_file(os.path.join(self.temp_conf_dir, CORE_CONF_FILE),
-                            "hadoop.tmp.dir",
-                            self.hadoop_temp_dir, True)
-        replace_in_xml_file(os.path.join(self.temp_conf_dir, CORE_CONF_FILE),
-                            "topology.script.file.name",
-                            self.conf_dir + "/topo.sh", True)
-
-        replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
-                            "mapred.job.tracker",
-                            self.master.address + ":" +
-                            str(self.mapred_port), True)
-
         if default_tuning:
             logger.info("Default tuning. Beware that this configuration is not"
-                        " guaranteed to be optimal for all scenarios.")
-            num_cores = cluster.get_num_cores()
-            total_memory_mb = cluster.get_memory() - 2 * 1024
-            mem_per_slot_mb = max(200, total_memory_mb / (num_cores - 1))
+                        "guaranteed to be optimal for all scenarios.")
 
-            replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
+        # Get cluster-dependent params
+        params = self._get_cluster_params(conf_dir, default_tuning)
+        logger.info("Params = " + str(params))
+
+        # Set common configuration
+        self._set_common_params(params, conf_dir, default_tuning)
+
+        # Set cluster-dependent configuration and copy back to hosts
+        for cluster in self.hw.get_clusters():
+
+            # Create a new dir
+            cl_temp_conf_base_dir = tempfile.mkdtemp("", "hadoop-cl-", "/tmp")
+            cl_temp_conf_dir = os.path.join(cl_temp_conf_base_dir, "conf")
+            shutil.copytree(conf_dir, cl_temp_conf_dir)
+
+            # Replace params in conf files
+            self._set_cluster_params(cluster, params, cl_temp_conf_dir,
+                                     default_tuning)
+
+            # Copy to hosts and remove temp dir
+            hosts = cluster.get_hosts()
+            self._copy_conf(cl_temp_conf_dir, hosts)
+            shutil.rmtree(cl_temp_conf_base_dir)
+
+    def _get_cluster_params(self, conf_dir, default_tuning=False):
+        """Define host-dependant parameters.
+
+           Args:
+             conf_dir (str):
+               The path of the directory with the configuration files.
+             default_tuning (bool, optional):
+               Whether to use automatic tuning based on some best practices or
+               leave the default parameters.
+        """
+
+        min_slot_mem = 200
+
+        params = {}
+        for cluster in self.hw.get_clusters():
+
+            num_cores = cluster.get_num_cores()
+            available_mem = cluster.get_memory()
+            mr_memory_mb = available_mem - 2 * 1024
+            mem_per_slot_mb = max(min_slot_mem,
+                                  mr_memory_mb / (num_cores - 1))
+            map_slots = num_cores - 1
+            red_slots = num_cores - 1
+
+            cluster_params = {
+                "mem_per_slot_mb": mem_per_slot_mb,
+                "map_slots": map_slots,
+                "red_slots": red_slots
+            }
+
+            if default_tuning:
+                io_sort_mb = max(100, mem_per_slot_mb / 2)
+                io_sort_factor = max(10, io_sort_mb / 10)
+
+                cluster_params.update({
+                    "io_sort_mb": io_sort_mb,
+                    "io_sort_factor": io_sort_factor
+                })
+
+            params[cluster.get_name()] = cluster_params
+
+        return params
+
+    def _set_common_params(self, params, conf_dir, default_tuning=False):
+        """Replace common parameters. Some user-specified values are
+        overwritten.
+
+           Args:
+             params (str):
+               Already defined parameters over all the clusters.
+             conf_dir (str):
+               The path of the directory with the configuration files.
+             default_tuning (bool, optional):
+               Whether to use automatic tuning based on some best practices or
+               leave the default parameters.
+        """
+
+        core_file = os.path.join(conf_dir, CORE_CONF_FILE)
+        mr_file = os.path.join(conf_dir, MR_CONF_FILE)
+
+        replace_in_xml_file(core_file,
+                            "fs.default.name",
+                            "hdfs://%s:%d/" % (self.master.address,
+                                               self.hdfs_port),
+                            create_if_absent=True)
+        replace_in_xml_file(core_file,
+                            "hadoop.tmp.dir",
+                            self.hadoop_temp_dir,
+                            create_if_absent=True)
+        replace_in_xml_file(core_file,
+                            "topology.script.file.name",
+                            self.conf_dir + "/topo.sh",
+                            create_if_absent=True)
+
+        replace_in_xml_file(mr_file,
+                            "mapred.job.tracker",
+                            "%s:%d" % (self.master.address, self.mapred_port),
+                            create_if_absent=True)
+
+    def _set_cluster_params(self, cluster, params,
+                            conf_dir, default_tuning=False):
+        """Replace cluster-dependent parameters.
+
+           Args:
+             cluster (PhysicalCluster):
+               The PhysicalCluster object to take into account in the
+               configuration.
+             params (str):
+               Already defined parameters over all the clusters.
+             conf_dir (str):
+               The path of the directory with the configuration files.
+             default_tuning (bool, optional):
+               Whether to use automatic tuning based on some best practices or
+               leave the default parameters.
+        """
+
+        cname = cluster.get_name()
+
+        mem_per_slot_mb = params[cname]["mem_per_slot_mb"]
+        map_slots = params[cname]["map_slots"]
+        red_slots = params[cname]["red_slots"]
+
+        if default_tuning:
+            mr_file = os.path.join(conf_dir, MR_CONF_FILE)
+
+            replace_in_xml_file(mr_file,
                                 "mapred.tasktracker.map.tasks.maximum",
-                                str(num_cores - 1),
+                                str(map_slots),
                                 create_if_absent=True,
                                 replace_if_present=False)
-            replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
+            replace_in_xml_file(mr_file,
                                 "mapred.tasktracker.reduce.tasks.maximum",
-                                str(num_cores - 1),
+                                str(red_slots),
                                 create_if_absent=True,
                                 replace_if_present=False)
-            replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
+            replace_in_xml_file(mr_file,
                                 "mapred.child.java.opts",
-                                "-Xmx" + str(mem_per_slot_mb) + "m",
+                                "-Xmx%dm" % mem_per_slot_mb,
                                 create_if_absent=True,
                                 replace_if_present=False)
 
@@ -845,8 +956,8 @@ class HadoopCluster(object):
 
     def clean_conf(self):
         """Clean configuration files used by this cluster."""
-
-        shutil.rmtree(self.temp_conf_dir)
+        pass
+        #shutil.rmtree(self.temp_conf_dir)
 
     def clean_logs(self):
         """Remove all Hadoop logs."""

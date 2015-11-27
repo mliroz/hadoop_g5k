@@ -1,7 +1,5 @@
 import getpass
 import os
-import shutil
-import tempfile
 
 from execo import Get, Remote
 from execo.process import SshProcess
@@ -66,190 +64,16 @@ class HadoopV2Cluster(HadoopCluster):
         """
         
         super(HadoopV2Cluster, self).__init__(hosts, topo_list, config_file)
+
+        self.conf_mandatory_files = [CORE_CONF_FILE,
+                                     HDFS_CONF_FILE,
+                                     MR_CONF_FILE,
+                                     YARN_CONF_FILE]
         
         self.sbin_dir = self.base_dir + "/sbin"
 
-    def _copy_base_conf(self):
-        """Copy base configuration files to tmp dir."""
-
-        self.temp_conf_dir = tempfile.mkdtemp("", "hadoop-", "/tmp")
-        if os.path.exists(self.local_base_conf_dir):
-            base_conf_files = [os.path.join(self.local_base_conf_dir, f)
-                               for f in os.listdir(self.local_base_conf_dir)]
-            for f in base_conf_files:
-                shutil.copy(f, self.temp_conf_dir)
-        else:
-            logger.warn(
-                "Local conf dir does not exist. Using default configuration")
-            base_conf_files = []
-
-        mandatory_files = [CORE_CONF_FILE, HDFS_CONF_FILE, MR_CONF_FILE,
-                           YARN_CONF_FILE]
-
-        missing_conf_files = mandatory_files
-        for f in base_conf_files:
-            f_base_name = os.path.basename(f)
-            if f_base_name in missing_conf_files:
-                missing_conf_files.remove(f_base_name)
-
-        logger.info("Copying missing conf files from master: " + str(
-            missing_conf_files))
-
-        remote_missing_files = [os.path.join(self.conf_dir, f)
-                                for f in missing_conf_files]
-
-        action = Get([self.master], remote_missing_files, self.temp_conf_dir)
-        action.run()
-
-    def _configure_servers(self, cluster=None, default_tuning=False):
-        """Configure servers and host-dependant parameters.
-
-           Args:
-             cluster (PhysicalCluster, optional):
-               The PhysicalCluster object to take into account in the
-               configuration. If not specified, the physical cluster of the
-               master is considered.
-             default_tuning (bool, optional):
-               Whether to use automatic tuning based on some best practices or
-               leave the default parameters.
-        """
-
-        if not cluster:
-            cluster = self.master_cluster
-
-        # Node variables
-        num_cores = cluster.get_num_cores()
-        available_mem = cluster.get_memory()
-
-        # General and HDFS
-        replace_in_xml_file(os.path.join(self.temp_conf_dir, CORE_CONF_FILE),
-                            "fs.defaultFS",
-                            "hdfs://" + self.master.address + ":" +
-                                        str(self.hdfs_port) + "/",
-                            True)
-        replace_in_xml_file(os.path.join(self.temp_conf_dir, CORE_CONF_FILE),
-                            "hadoop.tmp.dir",
-                            self.hadoop_temp_dir, True)
-        replace_in_xml_file(os.path.join(self.temp_conf_dir, CORE_CONF_FILE),
-                            "topology.script.file.name",
-                            self.conf_dir + "/topo.sh", True)
-
-        # YARN
-        # - RM memory: 75% of node memory
-        # - RM cores: # node cores - 1
-        # - Container:
-        #   * Max memory = RM memory
-        #   * Max cores = RM cores
-
-        total_conts_mem_mb = min(available_mem - 2 * 1024,
-                                      int(0.75 * available_mem))
-        max_cont_mem_mb = total_conts_mem_mb
-
-        replace_in_xml_file(os.path.join(self.temp_conf_dir, YARN_CONF_FILE),
-                            "yarn.resourcemanager.hostname",
-                            self.master.address, True)
-
-        replace_in_xml_file(os.path.join(self.temp_conf_dir, YARN_CONF_FILE),
-                            "yarn.nodemanager.resource.memory-mb",
-                            str(total_conts_mem_mb), True)
-        replace_in_xml_file(os.path.join(self.temp_conf_dir, YARN_CONF_FILE),
-                            "yarn.nodemanager.resource.cpu-vcores",
-                            str(num_cores), True)
-
-        replace_in_xml_file(os.path.join(self.temp_conf_dir, YARN_CONF_FILE),
-                            "yarn.scheduler.maximum-allocation-mb",
-                            str(max_cont_mem_mb), True)
-        replace_in_xml_file(os.path.join(self.temp_conf_dir, YARN_CONF_FILE),
-                            "yarn.scheduler.maximum-allocation-vcores",
-                            str(num_cores), True)
-
-        replace_in_xml_file(os.path.join(self.temp_conf_dir, YARN_CONF_FILE),
-                            "yarn.nodemanager.aux-services",
-                            "mapreduce_shuffle", True)
-
-        # yarn.sharedcache.enabled
-
-        # MapReduce
-        replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
-                            "mapreduce.framework.name", "yarn", True)
-
-        if default_tuning:
-            logger.info("Default tuning. Beware that this configuraiton is not"
-                        "guaranteed to be optimal for all scenarios.")
-
-            # Defaults calculations
-            if available_mem < 8:
-                min_cont_mem = 512
-            elif available_mem < 24:
-                min_cont_mem = 1024
-            else:
-                min_cont_mem = 2048
-
-            num_conts = min(int(1.5 * num_cores),
-                            total_conts_mem_mb / min_cont_mem)
-            map_mem = max(min_cont_mem, total_conts_mem_mb / num_conts)
-            red_mem = map_mem * 2
-            map_java_heap = int(map_mem * 0.8)
-            red_java_heap = int(red_mem * 0.8)
-
-            io_sort_mb = max(100, map_java_heap / 2)
-            io_sort_factor = max(10, io_sort_mb / 10)
-
-            # Memory and core settings
-            replace_in_xml_file(os.path.join(self.temp_conf_dir, YARN_CONF_FILE),
-                                "yarn.scheduler.minimum-allocation-mb",
-                                str(min_cont_mem), True)
-
-            replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
-                                "mapreduce.map.memory.mb",
-                                str(map_mem), True)
-            replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
-                                "mapreduce.map.java.opts",
-                                "-Xmx" + str(map_java_heap) + "m", True)
-            replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
-                                "mapreduce.map.cpu.vcores", "1", True)
-            replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
-                                "mapreduce.reduce.memory.mb",
-                                str(red_mem), True)
-            replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
-                                "mapreduce.reduce.java.opts",
-                                "-Xmx" + str(red_java_heap) + "m", True)
-            replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
-                                "mapreduce.reduce.cpu.vcores", "1", True)
-
-            # Note:
-            # If scheduler.capacity.resource-calculator is not set to
-            # org.apache.hadoop.yarn.util.resource.DominantResourceCalculator
-            # CPU scheduling is not enabled
-
-            # Shuffle
-            replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
-                                "mapreduce.map.output.compress", "true", True)
-            replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
-                                "mapreduce.task.io.sort.mb",
-                                str(io_sort_mb), True)
-            replace_in_xml_file(os.path.join(self.temp_conf_dir, MR_CONF_FILE),
-                                "mapreduce.task.io.sort.factor",
-                                str(io_sort_factor), True)
-
-    def bootstrap(self, tar_file):
-        """Install Hadoop in all cluster nodes from the specified tar.gz file.
-
-        Args:
-          hadoop_tar_file (str):
-            The file containing Hadoop binaries.
-        """
-
-        if super(HadoopV2Cluster, self).bootstrap(tar_file):
-            action = Remote("cp " + os.path.join(self.conf_dir,
-                                                 MR_CONF_FILE + ".template ") +
-                            os.path.join(self.conf_dir, MR_CONF_FILE),
-                            self.hosts)
-            action.run()
-
     def _check_version_compliance(self):
-        version = self.get_version()
-        if not version.startswith("Hadoop 2."):
+        if self.get_major_version() != 2:
             logger.error("Version of HadoopCluster is not compliant with the "
                         "distribution provided in the bootstrap option. Use "
                         "the appropiate parameter for --version when creating "
@@ -257,6 +81,270 @@ class HadoopV2Cluster(HadoopCluster):
             return False
         else:
             return True
+
+    def _initialize_conf(self):
+        """Merge locally-specified configuration files with default files
+        from the distribution"""
+
+        action = Remote("cp " + os.path.join(self.conf_dir,
+                                             MR_CONF_FILE + ".template ") +
+                        os.path.join(self.conf_dir, MR_CONF_FILE),
+                        self.hosts)
+        action.run()
+
+        super(HadoopV2Cluster, self)._initialize_conf()
+
+    def _get_cluster_params(self, conf_dir, default_tuning=False):
+        """Define host-dependant parameters.
+
+           Args:
+             conf_dir (str):
+               The path of the directory with the configuration files.
+             default_tuning (bool, optional):
+               Whether to use automatic tuning based on some best practices or
+               leave the default parameters.
+        """
+
+        params = {}
+
+        # Calculate container maximums (for NMs and scheduler)
+        # Maximum scheduled container is maximum allowed container in the
+        # whole cluster
+        sch_max_mem = 0
+        sch_max_cores = 0
+        for cluster in self.hw.get_clusters():
+
+            num_cores = cluster.get_num_cores()
+            available_mem = cluster.get_memory()
+            total_conts_mem = min(available_mem - 2 * 1024,
+                                  int(0.75 * available_mem))
+            max_cont_mem = total_conts_mem
+            sch_max_mem = max(sch_max_mem, max_cont_mem)
+            sch_max_cores = max(sch_max_cores, num_cores)
+
+            cluster_params = {
+                "max_cont_cores": num_cores,
+                "max_cont_mem": max_cont_mem,
+            }
+
+            params[cluster.get_name()] = cluster_params
+
+        # Global parameters
+        params["global"] = {
+            "sch_max_mem": sch_max_mem,
+            "sch_max_cores": sch_max_cores
+        }
+
+        if default_tuning:
+
+            # Calculate min container memory for the whole cluster
+            min_cluster_mem = self.hw.get_max_cores_cluster().get_memory()
+            for cluster in self.hw.get_clusters():
+                min_cluster_mem = min(min_cluster_mem, cluster.get_memory())
+
+            if min_cluster_mem < 8:
+                min_cont_mem = 512
+            elif min_cluster_mem < 24:
+                min_cont_mem = 1024
+            else:
+                min_cont_mem = 2048
+
+            # Calculate params for map and reduce tasks
+            min_map_mem = sch_max_mem
+            for cluster in self.hw.get_clusters():
+                num_conts = min(int(1.5 * cluster.get_num_cores()),
+                                total_conts_mem / min_cont_mem)
+                map_mem = max(min_cont_mem, total_conts_mem / num_conts)
+
+                min_map_mem = min(min_map_mem, map_mem)
+
+            map_mem = min_map_mem
+            red_mem = 2 * map_mem
+            map_java_heap = int(map_mem * 0.8)  # 20% JVM non-heap overhead
+            red_java_heap = int(red_mem * 0.8)
+            io_sort_mb = max(100, map_java_heap / 2)
+            io_sort_factor = max(10, io_sort_mb / 10)
+
+            params["global"].update({
+                "min_cont_mem": min_cont_mem,
+                "map_mem": map_mem,
+                "red_mem": red_mem,
+                "map_java_heap": map_java_heap,
+                "red_java_heap": red_java_heap,
+                "io_sort_mb": io_sort_mb,
+                "io_sort_factor": io_sort_factor
+            })
+
+        return params
+
+    def _set_common_params(self, params, conf_dir, default_tuning=False):
+        """Replace common parameters. Some user-specified values are
+        overwritten.
+
+           Args:
+             params (str):
+               Already defined parameters over all the clusters.
+             conf_dir (str):
+               The path of the directory with the configuration files.
+             default_tuning (bool, optional):
+               Whether to use automatic tuning based on some best practices or
+               leave the default parameters.
+        """
+
+        core_file = os.path.join(conf_dir, CORE_CONF_FILE)
+        yarn_file = os.path.join(conf_dir, YARN_CONF_FILE)
+        mr_file = os.path.join(conf_dir, MR_CONF_FILE)
+
+        global_params = params["global"]
+        sch_max_mem = global_params["sch_max_mem"]
+        sch_max_cores = global_params["sch_max_cores"]
+
+        # General and HDFS
+        replace_in_xml_file(core_file,
+                            "fs.defaultFS",
+                            "hdfs://%s:%d/" % (self.master.address,
+                                               self.hdfs_port),
+                            create_if_absent=True,
+                            replace_if_present=True)
+        replace_in_xml_file(core_file,
+                            "hadoop.tmp.dir",
+                            self.hadoop_temp_dir,
+                            create_if_absent=True,
+                            replace_if_present=True)
+        replace_in_xml_file(core_file,
+                            "topology.script.file.name",
+                            self.conf_dir + "/topo.sh",
+                            create_if_absent=True,
+                            replace_if_present=True)
+
+        # YARN
+        replace_in_xml_file(yarn_file,
+                            "yarn.resourcemanager.hostname",
+                            self.master.address,
+                            create_if_absent=True)
+
+        replace_in_xml_file(mr_file,
+                            "mapreduce.framework.name", "yarn",
+                            create_if_absent=True,
+                            replace_if_present=True)
+
+        replace_in_xml_file(yarn_file,
+                            "yarn.nodemanager.aux-services",
+                            "mapreduce_shuffle",
+                            create_if_absent=True,
+                            replace_if_present=True)
+
+        replace_in_xml_file(yarn_file,
+                            "yarn.scheduler.maximum-allocation-mb",
+                            str(sch_max_mem),
+                            create_if_absent=True,
+                            replace_if_present=default_tuning)
+        replace_in_xml_file(yarn_file,
+                            "yarn.scheduler.maximum-allocation-vcores",
+                            str(sch_max_cores),
+                            create_if_absent=True,
+                            replace_if_present=default_tuning)
+
+        if default_tuning:
+
+            # YARN
+            min_cont_mem = global_params["min_cont_mem"]
+            replace_in_xml_file(yarn_file,
+                                "yarn.scheduler.minimum-allocation-mb",
+                                str(min_cont_mem),
+                                create_if_absent=True,
+                                replace_if_present=True)
+
+            # MR memory settings
+            map_mem = global_params["map_mem"]
+            red_mem = global_params["red_mem"]
+            map_java_heap = global_params["map_java_heap"]
+            red_java_heap = global_params["red_java_heap"]
+
+            replace_in_xml_file(mr_file,
+                                "mapreduce.map.memory.mb",
+                                str(map_mem),
+                                create_if_absent=True,
+                                replace_if_present=True)
+            replace_in_xml_file(mr_file,
+                                "mapreduce.map.java.opts",
+                                "-Xmx%dm" % map_java_heap,
+                                create_if_absent=True,
+                                replace_if_present=True)
+
+            replace_in_xml_file(mr_file,
+                                "mapreduce.reduce.memory.mb",
+                                str(red_mem),
+                                create_if_absent=True,
+                                replace_if_present=True)
+            replace_in_xml_file(mr_file,
+                                "mapreduce.reduce.java.opts",
+                                "-Xmx%dm" % red_java_heap,
+                                create_if_absent=True,
+                                replace_if_present=True)
+
+            # MR core settings
+            replace_in_xml_file(mr_file,
+                                "mapreduce.map.cpu.vcores", "1",
+                                create_if_absent=True,
+                                replace_if_present=True)
+            replace_in_xml_file(mr_file,
+                                "mapreduce.map.reduce.vcores", "1",
+                                create_if_absent=True,
+                                replace_if_present=True)
+
+            # MR shuffle
+            io_sort_mb = global_params["io_sort_mb"]
+            io_sort_factor = global_params["io_sort_factor"]
+
+            replace_in_xml_file(mr_file,
+                                "mapreduce.map.output.compress", "true",
+                                create_if_absent=True,
+                                replace_if_present=True)
+            replace_in_xml_file(mr_file,
+                                "mapreduce.task.io.sort.mb",
+                                str(io_sort_mb),
+                                create_if_absent=True,
+                                replace_if_present=True)
+            replace_in_xml_file(mr_file,
+                                "mapreduce.task.io.sort.factor",
+                                str(io_sort_factor),
+                                create_if_absent=True,
+                                replace_if_present=True)
+
+    def _set_cluster_params(self, cluster, params,
+                            conf_dir, default_tuning=False):
+        """Replace cluster-dependent parameters
+
+           Args:
+             cluster (PhysicalCluster):
+               The PhysicalCluster object to take into account in the
+               configuration.
+             params (str):
+               Already defined parameters over all the clusters.
+             conf_dir (str):
+               The path of the directory with the configuration files.
+             default_tuning (bool, optional):
+               Whether to use automatic tuning based on some best practices or
+               leave the default parameters.
+        """
+
+        yarn_file = os.path.join(conf_dir, YARN_CONF_FILE)
+
+        cname = cluster.get_name()
+        max_mem = params[cname]["max_cont_mem"]
+        max_cores = params[cname]["max_cont_cores"]
+
+        replace_in_xml_file(yarn_file,
+                            "yarn.nodemanager.resource.memory-mb",
+                            str(max_mem),
+                            create_if_absent=True,
+                            replace_if_present=default_tuning)
+        replace_in_xml_file(yarn_file,
+                            "yarn.nodemanager.resource.cpu-vcores",
+                            str(max_cores),
+                            create_if_absent=True,
+                            replace_if_present=default_tuning)
 
     def start(self):
         """Start the NameNode and DataNodes and then the YARN ResourceManager
