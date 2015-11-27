@@ -167,7 +167,7 @@ class ColorDecorator(object):
 
 # Configuration functions #####################################################
 
-def read_in_xml_file(f, name, default=None):
+def read_param_in_xml_file(f, name, default=None):
     tree = ET.parse(f)
     root = tree.getroot()
     res = root.findall("./property/[name='%s']/value" % name)
@@ -175,6 +175,17 @@ def read_in_xml_file(f, name, default=None):
         return res[0].text
     else:
         return default
+
+
+def read_in_xml_file(f, param_names):
+    tree = ET.parse(f)
+    root = tree.getroot()
+
+    params = {}
+    for name in param_names:
+        res = root.findall("./property/[name='%s']/value" % name)
+        # Warning multiple parameters?
+        params[name] = res[-1].text
 
 
 def create_xml_file(f):
@@ -210,9 +221,7 @@ def replace_in_xml_file(f, name, value,
       True if the assignment has been made, False otherwise.
     """
 
-    current_value = read_in_xml_file(f, name)
-
-    print "current_value", current_value
+    current_value = read_param_in_xml_file(f, name)
 
     if current_value:
         if replace_if_present:
