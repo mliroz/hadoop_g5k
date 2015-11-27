@@ -178,14 +178,23 @@ def read_param_in_xml_file(f, name, default=None):
 
 
 def read_in_xml_file(f, param_names):
+
+    if not param_names:
+        return {}
+
+    local_param_names = list(param_names)
+
     tree = ET.parse(f)
     root = tree.getroot()
 
     params = {}
-    for name in param_names:
+    for name in local_param_names:
         res = root.findall("./property/[name='%s']/value" % name)
         # Warning multiple parameters?
-        params[name] = res[-1].text
+        if res:
+            params[name] = res[-1].text
+
+    return params
 
 
 def create_xml_file(f):
@@ -273,38 +282,3 @@ def replace_in_xml_file(f, name, value,
     shutil.copyfile(temp_file, f)
     os.remove(temp_file)
     return True
-
-
-def get_xml_params(f, param_names):
-
-    if not param_names:
-        return {}
-
-    local_param_names = list(param_names)
-
-    params = {}
-    for name in local_param_names:
-        params[name] = None
-
-    with open(f) as inf:
-        line = inf.readline()
-        while line != "":
-            for name in local_param_names:
-                if "<name>" + name + "</name>" in line:
-                    if "<value>" in line:
-                        match = re.match('.*<value>([^<]*)</value>.*', line)
-                        params[name] = match.group(1)
-                    else:
-                        line = inf.readline()
-                        if line != "":
-                            match = re.match('.*<value>([^<]*)</value>.*', line)
-                            params[name] = match.group(1)
-                        else:
-                            logger.error("Configuration file " + f +
-                                         " is not correctly formatted")
-
-                    del(name)
-                line = inf.readline()
-        inf.close()
-
-    return params

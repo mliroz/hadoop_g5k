@@ -16,7 +16,8 @@ from execo_g5k.api_utils import get_host_cluster
 from hadoop_g5k.hardware import G5kDeploymentHardware
 
 from hadoop_g5k.objects import HadoopJarJob, HadoopTopology, HadoopException
-from hadoop_g5k.util import ColorDecorator, replace_in_xml_file, get_xml_params
+from hadoop_g5k.util import ColorDecorator, replace_in_xml_file, \
+    read_in_xml_file, read_param_in_xml_file
 
 # Configuration files
 CORE_CONF_FILE = "core-site.xml"
@@ -606,9 +607,9 @@ class HadoopCluster(object):
 
         # Look in conf files
         for f in temp_conf_files:
-            fparams = get_xml_params(f, [param_name])
-            if fparams[param_name]:
-                return fparams[param_name]
+            value = read_param_in_xml_file(f, param_name)
+            if value:
+                return value
 
         return default
 
@@ -624,7 +625,7 @@ class HadoopCluster(object):
 
         # Look in conf files
         for f in temp_conf_files:
-            fparams = get_xml_params(f, remaining_param_names)
+            fparams = read_in_xml_file(f, remaining_param_names)
             for p in fparams:
                 if fparams[p]:
                     params[p] = fparams[p]
