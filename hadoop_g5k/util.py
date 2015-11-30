@@ -167,6 +167,12 @@ class ColorDecorator(object):
 
 # Configuration functions #####################################################
 
+def create_xml_file(f):
+    with open(f, "w") as fout:
+        fout.write("<configuration>\n")
+        fout.write("</configuration>")
+
+
 def read_param_in_xml_file(f, name, default=None):
     tree = ET.parse(f)
     root = tree.getroot()
@@ -195,12 +201,6 @@ def read_in_xml_file(f, param_names):
             params[name] = res[-1].text
 
     return params
-
-
-def create_xml_file(f):
-    with open(f, "w") as fout:
-        fout.write("<configuration>\n")
-        fout.write("</configuration>")
 
 
 def __replace_line(line, value):
@@ -282,3 +282,82 @@ def replace_in_xml_file(f, name, value,
     shutil.copyfile(temp_file, f)
     os.remove(temp_file)
     return True
+
+
+def __parse_props_line(line):
+
+    if line.startswith("#"):
+        return None, None
+    else:
+        parts = line.split()
+        if parts:
+            return parts
+        else:
+            return None, None
+
+
+def read_param_in_props_file(f, name, default=None):
+
+    with open(f) as in_file:
+        for line in in_file:
+            (pname, pvalue) = __parse_props_line(line)
+            if name and pname == name:
+                return pvalue
+
+    return default
+
+
+def read_in_props_file(f, param_names=None):
+
+    params = {}
+
+    with open(f) as in_file:
+        for line in in_file:
+            (pname, pvalue) = __parse_props_line(line)
+            if pname:
+                if param_names is None or pname in param_names:
+                    params[pname] = pvalue
+
+    return params
+
+
+def write_in_props_file(f, name, value, create_if_absent=False, override=True):
+
+    current_value = read_param_in_props_file(f, name)
+
+    if current_value:
+        if override:
+            (_, temp_file) = tempfile.mkstemp("", "xmlf-", "/tmp")
+            with open(f) as in_file, open(temp_file, "w") as out_file:
+
+                # Search property (we know it exists)
+                line = in_file.readline()
+                (pname, pvalue) = __parse_props_line(line)
+                while not pname or pname != name:
+                    out_file.write(line)
+                    line = in_file.readline()
+                    (pname, pvalue) = __parse_props_line(line)
+
+                # Replace with new value
+                out_file.write(pname + "\t" + str(value) + "\n")
+
+                # Write the rest of the file
+                line = in_file.readline()
+                while line != "":
+                    out_file.write(line)
+                    line = in_file.readline()
+
+            shutil.copyfile(temp_file, f)
+            os.remove(temp_file)
+            return True
+
+        else:
+            return False
+    else:
+        if create_if_absent:
+            with open(f, "a") as out_file:
+                out_file.write(name + "\t" + str(value) + "\n")
+            return True
+
+        else:
+            return False
