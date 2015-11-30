@@ -18,7 +18,7 @@ from hadoop_g5k.serialization import generate_new_id, \
     cluster_exists, link_to_hadoop_cluster
 
 
-if __name__ == "__main__":
+def parse_args():
 
     prog = "spark_g5k"
     description = "This tool helps you to manage a Spark cluster in Grid5000."
@@ -116,8 +116,19 @@ if __name__ == "__main__":
 
     actions.add_argument("--initialize",
                          dest="initialize",
-                         action="store_true",
-                         help="Initialize cluster: Copy configuration")
+                         nargs="?",
+                         metavar="feeling_lucky",
+                         const="no_default",
+                         default=None,
+                         action="store",
+                         help="Initialize cluster: copy configuration If "
+                              "nothing is specified, automatic\n"
+                              "configuration just concerns needed"
+                              "parameters and minimum tuning.\n"
+                              "If the option 'feeling_lucky' is used then "
+                              "some tuning is performed. Note that\n"
+                              "the chosen options may not be optimal for all "
+                              "scenarios.")
 
     actions.add_argument("--start",
                          dest="start",
@@ -198,7 +209,11 @@ if __name__ == "__main__":
                                 " be written without the \"--\" prefix (e.g., "
                                 "--exec_params driver-memory=1g)")
 
-    args = parser.parse_args()
+    return parser.parse_args()
+
+if __name__ == "__main__":
+
+    args = parse_args()
 
     # Get id
     if args.id:
@@ -279,7 +294,11 @@ if __name__ == "__main__":
         sc.bootstrap(args.bootstrap[0])
 
     if args.initialize:
-        sc.initialize()
+        if args.initialize == "feeling_lucky":
+            sc.initialize(default_tuning=True)
+        else:
+            sc.initialize()
+        changed = True
 
     if args.start:
         sc.start()

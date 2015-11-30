@@ -13,9 +13,14 @@ from execo.action import Put, TaktukPut, Get, Remote, TaktukRemote, \
 from execo.log import style
 from execo.process import SshProcess
 from execo_engine import logger
-from execo_g5k import get_host_attributes
+from execo_g5k import get_host_cluster
+from hadoop_g5k.hardware import G5kDeploymentHardware
 
-from hadoop_g5k.util import ColorDecorator
+from hadoop_g5k.util import ColorDecorator, read_in_props_file, \
+    write_in_props_file, read_param_in_props_file
+
+# Configuration files
+SPARK_CONF_FILE = "spark-defaults.conf"
 
 # Default parameters
 DEFAULT_SPARK_BASE_DIR = "/tmp/spark"
@@ -37,6 +42,10 @@ class SparkException(Exception):
 
 
 class SparkJobException(SparkException):
+    pass
+
+
+class SparkConfException(SparkException):
     pass
 
 
@@ -259,6 +268,11 @@ class SparkCluster(object):
         if config_file:
             config.readfp(open(config_file))
 
+        # Deployment properties
+        self.local_base_conf_dir = config.get("local", "local_base_conf_dir")
+        self.init_conf_dir = tempfile.mkdtemp("", "spark-init-", "/tmp")
+        self.conf_mandatory_files = [SPARK_CONF_FILE]
+
         self.base_dir = config.get("cluster", "spark_base_dir")
         self.conf_dir = config.get("cluster", "spark_conf_dir")
         self.logs_dir = config.get("cluster", "spark_logs_dir")
@@ -285,6 +299,11 @@ class SparkCluster(object):
             raise SparkException("Hosts in the cluster must be specified "
                                  "either directly or indirectly through a "
                                  "Hadoop cluster.")
+
+        # Store cluster information
+        self.hw = G5kDeploymentHardware()
+        self.hw.add_hosts(self.hosts)
+        self.master_cluster = self.hw.get_cluster(get_host_cluster(self.master))
 
         # Store reference to Hadoop cluster and check if mandatory
         self.hc = hadoop_cluster
@@ -379,19 +398,66 @@ class SparkCluster(object):
         action = Remote(command, self.hosts)
         action.run()
 
-    def initialize(self):
-        """Initialize the cluster: copy base configuration and format DFS."""
+        # 4. Generate initial configuration
+        self._initialize_conf()
+
+    def _initialize_conf(self):
+        """Merge locally-specified configuration files with default files
+        from the distribution."""
+
+        action = Remote("cp " + os.path.join(self.conf_dir,
+                                             SPARK_CONF_FILE + ".template ") +
+                        os.path.join(self.conf_dir, SPARK_CONF_FILE),
+                        self.hosts)
+        action.run()
+
+        if os.path.exists(self.local_base_conf_dir):
+            base_conf_files = [os.path.join(self.local_base_conf_dir, f)
+                               for f in os.listdir(self.local_base_conf_dir)]
+            for f in base_conf_files:
+                shutil.copy(f, self.init_conf_dir)
+        else:
+            logger.warn(
+                "Local conf dir does not exist. Using default configuration")
+            base_conf_files = []
+
+        missing_conf_files = self.conf_mandatory_files
+        for f in base_conf_files:
+            f_base_name = os.path.basename(f)
+            if f_base_name in missing_conf_files:
+                missing_conf_files.remove(f_base_name)
+
+        logger.info("Copying missing conf files from master: " + str(
+            missing_conf_files))
+
+        remote_missing_files = [os.path.join(self.conf_dir, f)
+                                for f in missing_conf_files]
+
+        action = Get([self.master], remote_missing_files, self.init_conf_dir)
+        action.run()
+
+    def initialize(self, default_tuning=False):
+        """Initialize the cluster: copy base configuration and format DFS.
+
+           Args
+             default_tuning (bool, optional):
+               Whether to use automatic tuning based on some best practices or
+               leave the default parameters.
+        """
 
         self._pre_initialize()
 
         logger.info("Initializing Spark")
 
         # Set basic configuration
-        self._copy_base_conf()
-        self._create_master_and_slave_conf()
-        self._configure_servers()
+        temp_conf_base_dir = tempfile.mkdtemp("", "spark-", "/tmp")
+        temp_conf_dir = os.path.join(temp_conf_base_dir, "conf")
+        shutil.copytree(self.init_conf_dir, temp_conf_dir)
 
-        self._copy_conf(self.temp_conf_dir, self.hosts)
+        self._create_master_and_slave_conf(temp_conf_dir)
+        self._configure_servers(temp_conf_dir, default_tuning)
+
+        shutil.rmtree(temp_conf_base_dir)
 
         self.initialized = True
 
@@ -407,52 +473,224 @@ class SparkCluster(object):
 
         self.initialized = False
 
-    def _copy_base_conf(self):
-        """Copy base configuration files to tmp dir."""
-
-        self.temp_conf_dir = tempfile.mkdtemp("", "spark-", "/tmp")
-        if os.path.exists(self.local_base_conf_dir):
-            base_conf_files = [os.path.join(self.local_base_conf_dir, f)
-                               for f in os.listdir(self.local_base_conf_dir)]
-            for f in base_conf_files:
-                shutil.copy(f, self.temp_conf_dir)
-        else:
-            logger.warn(
-                "Local conf dir does not exist. Using default configuration")
-            base_conf_files = []
-
-        mandatory_files = []
-
-        missing_conf_files = mandatory_files
-        for f in base_conf_files:
-            f_base_name = os.path.basename(f)
-            if f_base_name in missing_conf_files:
-                missing_conf_files.remove(f_base_name)
-
-        logger.info("Copying missing conf files from master: " + str(
-            missing_conf_files))
-
-        remote_missing_files = [os.path.join(self.conf_dir, f)
-                                for f in missing_conf_files]
-
-        action = Get([self.master], remote_missing_files, self.temp_conf_dir)
-        action.run()
-
-    def _create_master_and_slave_conf(self):
+    def _create_master_and_slave_conf(self, conf_dir):
         """Configure master and create slaves configuration files."""
 
-        with open(self.temp_conf_dir + "/spark-defaults.conf", "a") \
-                as defaults_file:
-            if self.mode == STANDALONE_MODE:
-                defaults_file.write("spark.master\t"
-                                    "spark://" + self.master.address + ":" +
-                                                 str(self.port) + "\n")
-            elif self.mode == YARN_MODE:
-                defaults_file.write("spark.master\tyarn-client\n")
+        defs_file = conf_dir + "/spark-defaults.conf"
 
-        with open(self.temp_conf_dir + "/slaves", "w") as slaves_file:
+        if self.mode == STANDALONE_MODE:
+            write_in_props_file(defs_file,
+                                "spark.master",
+                                "spark://%s:%d" % (self.master.address, self.port),
+                                create_if_absent=True,
+                                override=True)
+
+        elif self.mode == YARN_MODE:
+            write_in_props_file(defs_file,
+                                "spark.master", "yarn-client",
+                                create_if_absent=True,
+                                override=False)
+
+        with open(conf_dir + "/slaves", "w") as slaves_file:
             for s in self.hosts:
                 slaves_file.write(s.address + "\n")
+
+    def _configure_servers(self, conf_dir, default_tuning=False):
+        """Configure servers and host-dependant parameters.
+
+           Args:
+             conf_dir (str):
+               The path of the directory with the configuration files.
+             default_tuning (bool, optional):
+               Whether to use automatic tuning based on some best practices or
+               leave the default parameters.
+        """
+
+        if default_tuning:
+            logger.info("Default tuning. Beware that this configuration is not"
+                        "guaranteed to be optimal for all scenarios.")
+
+        # Get cluster-dependent params
+        params = self._get_cluster_params(conf_dir, default_tuning)
+        logger.info("Params = " + str(params))
+
+        # Set common configuration
+        self._set_common_params(params, conf_dir, default_tuning)
+
+        # Set cluster-dependent configuration and copy back to hosts
+        for cluster in self.hw.get_clusters():
+
+            # Create a new dir
+            cl_temp_conf_base_dir = tempfile.mkdtemp("", "spark-cl-", "/tmp")
+            cl_temp_conf_dir = os.path.join(cl_temp_conf_base_dir, "conf")
+            shutil.copytree(conf_dir, cl_temp_conf_dir)
+
+            # Replace params in conf files
+            self._set_cluster_params(cluster, params, cl_temp_conf_dir,
+                                     default_tuning)
+
+            # Copy to hosts and remove temp dir
+            hosts = cluster.get_hosts()
+            self._copy_conf(cl_temp_conf_dir, hosts)
+            shutil.rmtree(cl_temp_conf_base_dir)
+
+    def _get_cluster_params(self, conf_dir, default_tuning=False):
+        """Define host-dependant parameters.
+
+           Args:
+             conf_dir (str):
+               The path of the directory with the configuration files.
+             default_tuning (bool, optional):
+               Whether to use automatic tuning based on some best practices or
+               leave the default parameters.
+        """
+
+        defs_file = conf_dir + "/spark-defaults.conf"
+
+        params = {}
+
+        min_exec_mem = self.hw.get_max_memory_cluster().get_memory()
+        total_execs = 0
+
+        for cluster in self.hw.get_clusters():
+
+            num_cores = cluster.get_num_cores()
+            spark_cores = min(1, num_cores - 2)
+
+            available_mem = cluster.get_memory()
+            if self.mode == STANDALONE_MODE:
+                spark_mem = available_mem
+            elif self.mode == YARN_MODE:
+                total_conts_mem = int(self.hc.get_conf_param(
+                    "yarn.nodemanager.resource.memory-mb",
+                    8192,  # Default value in YARN
+                    node=cluster.get_hosts()[0]
+                ))
+
+                spark_mem = total_conts_mem
+
+            # Ideally: 5 threads / executor
+            execs_per_node = max(1, spark_cores / 5)
+
+            # Split memory and consider overhead
+            exec_mem = (spark_mem / execs_per_node)
+            mem_overhead = int(read_param_in_props_file(
+                defs_file,
+                "spark.yarn.executor.memoryOverhead",
+                max(385, 0.1 * exec_mem)))
+
+            if exec_mem < mem_overhead:
+                error_msg = "Not enough memory to use the specified memory " \
+                            "overhead: overhead = %d, executor memory = %d" \
+                            % (mem_overhead, exec_mem)
+                logger.error(error_msg)
+                raise SparkConfException(error_msg)
+            exec_mem -= mem_overhead
+            min_exec_mem = min(min_exec_mem, exec_mem)
+
+            # Accumulate executors
+            total_execs += len(cluster.get_hosts()) * execs_per_node
+
+            params[cluster.get_name()] = {}
+
+        # Global parameters
+        params["global"] = {
+            "exec_mem": min_exec_mem,
+            "exec_cores": 5,
+            "total_execs": total_execs
+        }
+
+        return params
+
+    def _set_common_params(self, params, conf_dir, default_tuning=False):
+        """Replace common parameters. Some user-specified values are
+        overwritten.
+
+           Args:
+             params (str):
+               Already defined parameters over all the clusters.
+             conf_dir (str):
+               The path of the directory with the configuration files.
+             default_tuning (bool, optional):
+               Whether to use automatic tuning based on some best practices or
+               leave the default parameters.
+        """
+
+        defs_file = conf_dir + "/spark-defaults.conf"
+
+        # spark-env.sh
+        command = "cat >> " + self.conf_dir + "/spark-env.sh << EOF\n"
+        command += "SPARK_MASTER_PORT=" + str(self.port) + "\n"
+        command += "EOF\n"
+        action = Remote(command, self.hosts)
+        action.run()
+
+        # Get already set parameters
+        global_params = params["global"]
+        exec_mem = global_params["exec_mem"]
+        exec_cores = global_params["exec_cores"]
+        total_execs = global_params["total_execs"]
+
+        # Log parameters
+        if self.evs_log_dir:
+            write_in_props_file(defs_file,
+                                "spark.eventLog.enabled", "true",
+                                create_if_absent=True,
+                                override=True)
+
+            write_in_props_file(defs_file,
+                                "spark.eventLog.dir", self.evs_log_dir,
+                                create_if_absent=True,
+                                override=True)
+
+        write_in_props_file(defs_file,
+                            "spark.logConf", "true",
+                            create_if_absent=True,
+                            override=False)
+
+        if default_tuning:
+
+            write_in_props_file(defs_file,
+                                "spark.executor.memory", "%dm" % exec_mem,
+                                create_if_absent=True,
+                                override=False)
+            write_in_props_file(defs_file,
+                                "spark.executor.cores", exec_cores,
+                                create_if_absent=True,
+                                override=False)
+            write_in_props_file(defs_file,
+                                "spark.executor.instances", total_execs,
+                                create_if_absent=True,
+                                override=False)
+
+            # if self.mode == YARN_MODE:
+            #     write_in_props_file(defs_file,
+            #                         "spark.dynamicAllocation.enabled", "true",
+            #                         create_if_absent=True,
+            #                         override=True)
+            #     self.hc.change_conf({
+            #         "spark.shuffle": "yarn.nodemanager.aux-services",
+            #         "yarn.nodemanager.aux-services.spark_shuffle.class":
+            #             "org.apache.spark.network.yarn.YarnShuffleService"
+            #     })
+
+    def _set_cluster_params(self, cluster, params,
+                            conf_dir, default_tuning=False):
+        """Replace cluster-dependent parameters.
+
+           Args:
+             cluster (PhysicalCluster):
+               The PhysicalCluster object to take into account in the
+               configuration.
+             params (str):
+               Already defined parameters over all the clusters.
+             conf_dir (str):
+               The path of the directory with the configuration files.
+             default_tuning (bool, optional):
+               Whether to use automatic tuning based on some best practices or
+               leave the default parameters.
+        """
+        pass
 
     def _copy_conf(self, conf_dir, hosts=None):
         """Copy configuration files from given dir to remote dir in cluster
@@ -478,61 +716,6 @@ class SparkCluster(object):
             logger.warn("Error while copying configuration")
             if not action.ended:
                 action.kill()
-
-    def _configure_servers(self):
-        """Configure servers and host-dependant parameters.
-        """
-
-        hosts = self.hosts
-
-        # spark-env.sh
-        command = "cat >> " + self.conf_dir + "/spark-env.sh << EOF\n"
-        command += "SPARK_MASTER_PORT=" + str(self.port) + "\n"
-        command += "EOF\n"
-        action = Remote(command, self.hosts)
-        action.run()
-
-        # Default parameters
-        with open(self.temp_conf_dir + "/spark-defaults.conf", "a") \
-                as defaults_file:
-
-            # Common configuration
-            if self.evs_log_dir:
-                defaults_file.write("spark.eventLog.enabled\ttrue\n")
-                defaults_file.write("spark.eventLog.dir\t" +
-                                    self.evs_log_dir + "\n")
-            defaults_file.write("spark.logConf\ttrue\n")
-
-            # defaults_file.write("spark.driver.memory\t1g\n")
-            # defaults_file.write("spark.driver.maxResultSize\t1g\n")
-            # defaults_file.write("spark.driver.cores\t1\n")
-
-            # If YARN (STANDALONE is good with defaults)
-            if self.mode == YARN_MODE:
-
-                host_attrs = get_host_attributes(hosts[0])
-                num_cores = host_attrs[u'architecture'][u'smt_size']
-                num_hosts = len(self.hosts)
-
-                # TODO: get from YARN
-                available_memory = (int(host_attrs[u'main_memory'][u'ram_size']) /
-                                    (1024 * 1024))
-                total_containers_mem_mb = min(available_memory - 2 * 1024,
-                                              int(0.75 * available_memory))
-
-                cores_per_executor = max(1, min(5, num_cores - 1))
-                executors_per_node = max(1, (num_cores - 1) / cores_per_executor)
-                mem_overhead = 0.1
-                executor_mem = (total_containers_mem_mb / executors_per_node)
-                executor_mem -= int(executor_mem * mem_overhead)
-                num_executors = num_hosts * executors_per_node
-
-                defaults_file.write("spark.executor.cores\t" +
-                                    str(cores_per_executor) + "\n")
-                defaults_file.write("spark.executor.memory\t" +
-                                    str(executor_mem) + "\n")
-                defaults_file.write("spark.executor.instances\t" +
-                                    str(num_executors) + "\n")
 
     def start(self):
         """Start spark processes."""
@@ -694,8 +877,9 @@ class SparkCluster(object):
     def clean_conf(self):
         """Clean configuration files used by this cluster."""
 
-        if self.temp_conf_dir and os.path.exists(self.temp_conf_dir):
-            shutil.rmtree(self.temp_conf_dir)
+        #if self.temp_conf_dir and os.path.exists(self.temp_conf_dir):
+        #    shutil.rmtree(self.temp_conf_dir)
+        pass
 
     def clean_logs(self):
         """Remove all Spark logs."""
