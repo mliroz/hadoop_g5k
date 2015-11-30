@@ -16,8 +16,8 @@ from execo_engine import logger
 from execo_g5k import get_host_cluster
 from hadoop_g5k.hardware import G5kDeploymentHardware
 
-from hadoop_g5k.util import ColorDecorator, read_in_props_file, \
-    write_in_props_file, read_param_in_props_file
+from hadoop_g5k.util import ColorDecorator, write_in_props_file, \
+    read_param_in_props_file
 
 # Configuration files
 SPARK_CONF_FILE = "spark-defaults.conf"
@@ -478,18 +478,34 @@ class SparkCluster(object):
 
         defs_file = conf_dir + "/spark-defaults.conf"
 
-        if self.mode == STANDALONE_MODE:
+        spark_master = read_param_in_props_file(defs_file, "spark.master")
+
+        if spark_master and spark_master.startswith("local"):
+            logger.warn("Your default configuration executes Spark locally. "
+                        "Note that unless otherwise specified when launching "
+                        "your scripts, the distributed configuration will be "
+                        "ignored.")
+        else:
+
+            if self.mode == STANDALONE_MODE:
+                # Always override?
+                spark_master = "spark://%s:%d" % (self.master.address,
+                                                  self.port)
+
+            elif self.mode == YARN_MODE:
+                if spark_master:
+                    if spark_master not in ["yarn-client", "yarn-cluster"]:
+                        logger.warn("Provided spark.master is not compatible "
+                                    "with YARN mode. Overriding with "
+                                    "'yarn-client'")
+                        spark_master = "yarn-client"
+                else:
+                    spark_master = "yarn-client"
+
             write_in_props_file(defs_file,
-                                "spark.master",
-                                "spark://%s:%d" % (self.master.address, self.port),
+                                "spark.master", spark_master,
                                 create_if_absent=True,
                                 override=True)
-
-        elif self.mode == YARN_MODE:
-            write_in_props_file(defs_file,
-                                "spark.master", "yarn-client",
-                                create_if_absent=True,
-                                override=False)
 
         with open(conf_dir + "/slaves", "w") as slaves_file:
             for s in self.hosts:
@@ -508,7 +524,7 @@ class SparkCluster(object):
 
         if default_tuning:
             logger.info("Default tuning. Beware that this configuration is not"
-                        "guaranteed to be optimal for all scenarios.")
+                        " guaranteed to be optimal for all scenarios.")
 
         # Get cluster-dependent params
         params = self._get_cluster_params(conf_dir, default_tuning)
