@@ -4,8 +4,9 @@ import shutil
 import tempfile
 
 import xml.etree.ElementTree as ET
+from execo import SshProcess
 
-from execo.action import Remote
+from execo.action import Remote, TaktukRemote
 from execo.host import Host
 from execo.log import style
 from execo_engine import logger
@@ -48,6 +49,38 @@ def import_function(name):
 
     mod = __import__(package_name, fromlist=[function_name])
     return getattr(mod, function_name)
+
+
+# Requirements ################################################################
+
+def check_java_version(java_major_version, hosts):
+
+    tr = TaktukRemote("java -version 2>&1 | grep version", hosts)
+    tr.run()
+
+    for p in tr.processes:
+        match = re.match('.*[^.0-9]1\.([0-9]+).[0-9].*', p.stdout)
+        version = int(match.group(1))
+        if java_major_version > version:
+            msg = "Java 1.%d+ required" % java_major_version
+            return False
+
+    return True
+
+
+def get_java_home(host):
+    proc = SshProcess('echo $(readlink -f /usr/bin/javac | '
+                               'sed "s:/bin/javac::")', host)
+    proc.run()
+    return proc.stdout.strip()
+
+
+def check_packages(packages, hosts):
+    tr = TaktukRemote("dpkg -s " + packages, hosts)
+    for p in tr.processes:
+        p.nolog_exit_code = p.nolog_error = True
+    tr.run()
+    return tr.ok
 
 
 # Compression #################################################################

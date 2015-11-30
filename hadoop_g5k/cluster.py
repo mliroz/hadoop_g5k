@@ -17,7 +17,7 @@ from hadoop_g5k.hardware import G5kDeploymentHardware
 
 from hadoop_g5k.objects import HadoopJarJob, HadoopTopology, HadoopException
 from hadoop_g5k.util import ColorDecorator, replace_in_xml_file, \
-    read_in_xml_file, read_param_in_xml_file
+    read_in_xml_file, read_param_in_xml_file, check_java_version, get_java_home
 
 # Configuration files
 CORE_CONF_FILE = "core-site.xml"
@@ -127,6 +127,8 @@ class HadoopCluster(object):
         self.bin_dir = self.base_dir + "/bin"
         self.sbin_dir = self.base_dir + "/bin"
 
+        self.java_home = None
+
         # Configure master and slaves
         self.hosts = list(hosts)
         self.master = self.hosts[0]
@@ -160,28 +162,14 @@ class HadoopCluster(object):
             The file containing Hadoop binaries.
         """
 
-        # 0. Check that required packages are present
-        required_packages = "openjdk-7-jre openjdk-7-jdk"
-        check_packages = TaktukRemote("dpkg -s " + required_packages,
-                                      self.hosts)
-        for p in check_packages.processes:
-            p.nolog_exit_code = p.nolog_error = True
-        check_packages.run()
-        if not check_packages.ok:
-            logger.info("Packages not installed, trying to install")
-            install_packages = TaktukRemote(
-                "export DEBIAN_MASTER=noninteractive ; " +
-                "apt-get update && apt-get install -y --force-yes " +
-                required_packages, self.hosts).run()
-            if not install_packages.ok:
-                logger.error("Unable to install the packages")
+        # 0. Check requirements
+        java_major_version = 7
+        if not check_java_version(java_major_version, self.hosts):
+            msg = "Java 1.%d+ required" % java_major_version
+            logger.error(msg)
+            raise HadoopException(msg)
 
-        get_java_home = SshProcess('echo $(readlink -f /usr/bin/javac | '
-                                   'sed "s:/bin/javac::")', self.master)
-        get_java_home.run()
-        self.java_home = get_java_home.stdout.strip()
-
-        logger.info("All required packages are present")
+        self.java_home = get_java_home(self.master)
 
         # 1. Copy hadoop tar file and uncompress
         logger.info("Copy " + tar_file + " to hosts and uncompress")
