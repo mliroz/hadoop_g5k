@@ -101,7 +101,7 @@ def deserialize_cluster(cluster_type, cid):
 
     fname = __get_cluster_file(cluster_type, cid)
 
-    logger.info("Deserialize cluster from " + fname)
+    logger.debug("Deserialize cluster from " + fname)
 
     with open(fname, 'rb') as c_file:
         cluster_object = pickle.load(c_file)
@@ -124,7 +124,7 @@ def serialize_cluster(cluster_type, cid, cluster_object):
 
     fname = __get_cluster_file(cluster_type, cid)
 
-    logger.info("Serialize cluster (" + cluster_type + ") in " + fname)
+    logger.debug("Serialize cluster (" + cluster_type + ") in " + fname)
 
     c_file = open(fname, 'wb')
     pickle.dump(cluster_object, c_file)

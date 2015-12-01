@@ -228,7 +228,7 @@ if __name__ == "__main__":
                              " new one")
                 sys.exit(os.EX_DATAERR)
 
-    logger.info("Using id = " + str(sc_id) + " (SPARK)")
+        logger.debug("Using id = " + str(sc_id) + " (SPARK)")
 
     verbose = not args.quiet
 
@@ -288,6 +288,9 @@ if __name__ == "__main__":
 
         # Deserialize
         sc = deserialize_cluster(SparkCluster.get_cluster_type(), sc_id)
+
+        # Print cluster info
+        logger.info("spark_id = %d -> %s" % (sc_id, sc))
 
     # Execute options
     if args.bootstrap:

@@ -1062,3 +1062,20 @@ class HadoopCluster(object):
         match = re.match('Hadoop ([0-9]).*', str_version)
         return int(match.group(1))
 
+    def __str__(self):
+        if self.initialized:
+            if self.running:
+                state = "running"
+            else:
+                state = "initialized"
+        else:
+            state = "not initialized"
+
+        node_info = ", ".join(["%s:%d" % (c.get_name(), len(c.get_hosts()))
+                               for c in self.hw.get_clusters()])
+
+        return "%s([%s], %s)" % (
+            type(self).__name__,
+            node_info,
+            state
+        )

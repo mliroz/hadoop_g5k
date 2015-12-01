@@ -434,7 +434,7 @@ if __name__ == "__main__":
                              " new one")
                 sys.exit(os.EX_DATAERR)
 
-    logger.info("Using id = " + str(hc_id) + " (HADOOP)")
+        logger.debug("Using id = " + str(hc_id) + " (HADOOP)")
 
     verbose = not args.quiet
 
@@ -497,6 +497,9 @@ if __name__ == "__main__":
         else:
             # Deserialize
             hc = deserialize_cluster(HadoopCluster.get_cluster_type(), hc_id)
+
+        # Print cluster info
+        logger.info("hadoop_id = %d -> %s" % (hc_id, hc))
 
     # Execute options
     if args.bootstrap:
