@@ -173,16 +173,19 @@ class HadoopCluster(object):
 
         # 1. Copy hadoop tar file and uncompress
         logger.info("Copy " + tar_file + " to hosts and uncompress")
-        rm_dirs = Remote("rm -rf " + self.base_dir +
-                         " " + self.conf_dir +
-                         " " + self.logs_dir +
-                         " " + self.hadoop_temp_dir,
-                         self.hosts)
+        rm_dirs = TaktukRemote("rm -rf " + self.base_dir +
+                               " " + self.conf_dir +
+                               " " + self.logs_dir +
+                               " " + self.hadoop_temp_dir,
+                               self.hosts)
         put_tar = TaktukPut(self.hosts, [tar_file], "/tmp")
         tar_xf = TaktukRemote(
             "tar xf /tmp/" + os.path.basename(tar_file) + " -C /tmp",
             self.hosts)
-        SequentialActions([rm_dirs, put_tar, tar_xf]).run()
+        rm_tar = TaktukRemote(
+            "rm /tmp/" + os.path.basename(tar_file),
+            self.hosts)
+        SequentialActions([rm_dirs, put_tar, tar_xf, rm_tar]).run()
 
         # 2. Move installation to base dir and create other dirs
         logger.info("Create installation directories")

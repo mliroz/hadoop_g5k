@@ -346,7 +346,10 @@ class SparkCluster(object):
         tar_xf = TaktukRemote(
             "tar xf /tmp/" + os.path.basename(tar_file) + " -C /tmp",
             self.hosts)
-        SequentialActions([rm_dirs, put_tar, tar_xf]).run()
+        rm_tar = TaktukRemote(
+            "rm /tmp/" + os.path.basename(tar_file),
+            self.hosts)
+        SequentialActions([rm_dirs, put_tar, tar_xf, rm_tar]).run()
 
         # 2. Move installation to base dir
         logger.info("Create installation directories")
