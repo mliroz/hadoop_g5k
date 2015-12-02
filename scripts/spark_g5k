@@ -130,6 +130,18 @@ def parse_args():
                               "the chosen options may not be optimal for all "
                               "scenarios.")
 
+    actions.add_argument("--changeconf",
+                         action="store",
+                         nargs="+",
+                         metavar=("[CONF_FILE] NAME=VALUE", "NAME=VALUE"),
+                         help="Change given configuration variables")
+
+    actions.add_argument("--getconf",
+                         action="store",
+                         nargs="+",
+                         metavar="PARAM_NAME",
+                         help="Get the values of the specified variables")
+
     actions.add_argument("--start",
                          dest="start",
                          action="store_true",
@@ -302,6 +314,31 @@ if __name__ == "__main__":
         else:
             sc.initialize()
         changed = True
+
+    if args.changeconf:
+        if "=" in args.changeconf[0]:
+            conf_file = None
+            list_params = args.changeconf
+        else:
+            conf_file = args.changeconf[0]
+            list_params = args.changeconf[1:]
+
+        params = {}
+        for assig in list_params:
+            parts = assig.split("=")
+            params[parts[0]] = parts[1]
+
+        if conf_file:
+            sc.change_conf(params, conf_file=conf_file)
+        else:
+            sc.change_conf(params)
+
+        changed = True
+
+    if args.getconf:
+        params = sc.get_conf(args.getconf)
+        for p in params:
+            print p + " = " + params[p]
 
     if args.start:
         sc.start()

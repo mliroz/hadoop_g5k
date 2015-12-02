@@ -18,7 +18,8 @@ from execo_g5k import get_host_cluster
 from hadoop_g5k.hardware import G5kDeploymentHardware
 
 from hadoop_g5k.util import ColorDecorator, write_in_props_file, \
-    read_param_in_props_file, check_java_version, get_java_home
+    read_param_in_props_file, check_java_version, get_java_home, \
+    read_in_props_file
 
 # Configuration files
 SPARK_CONF_FILE = "spark-defaults.conf"
@@ -823,6 +824,125 @@ class SparkCluster(object):
         else:
             logger.error("Unknown language " + language)
             return
+
+    def change_conf(self, params, conf_file=None,
+                    default_file=SPARK_CONF_FILE):
+        """Modify Spark configuration. This method copies the configuration
+        files from the first host of each g5k cluster conf dir into a local
+        temporary dir, do all the changes in place and broadcast the new
+        configuration files to all hosts.
+
+        Args:
+          params (dict of str:str):
+            The parameters to be changed in the form key:value.
+          conf_file (str, optional):
+            The file where parameters should be set. If not specified, all
+            files are checked for the parameter name and the parameter is set
+            in the file where the property is found. If not found, the
+            parameter is set in the default file.
+          default_file (str, optional): The default conf file where to set the
+            parameter if not found. Only applies when conf_file is not set.
+        """
+
+        for cluster in self.hw.get_clusters():
+            hosts = cluster.get_hosts()
+
+            # Copy conf files from first host in the cluster
+            action = Remote("ls " + self.conf_dir + "/*.conf", [hosts[0]])
+            action.run()
+            output = action.processes[0].stdout
+
+            remote_conf_files = []
+            for f in output.split():
+                remote_conf_files.append(os.path.join(self.conf_dir, f))
+
+            tmp_dir = "/tmp/mliroz_temp_spark/"
+            if not os.path.exists(tmp_dir):
+                os.makedirs(tmp_dir)
+
+            action = Get([hosts[0]], remote_conf_files, tmp_dir)
+            action.run()
+
+            # Do replacements in temp file
+            if conf_file:
+                f = os.path.join(tmp_dir, conf_file)
+                for name, value in params.iteritems():
+                    write_in_props_file(f, name, value, True)
+            else:
+                temp_conf_files = [os.path.join(tmp_dir, f) for f in
+                                   os.listdir(tmp_dir)]
+
+                for name, value in params.iteritems():
+                    for f in temp_conf_files:
+                        if write_in_props_file(f, name, value):
+                            break
+                    else:
+                        # Property not found - add it in SPARK_CONF_FILE
+                        logger.info("Parameter with name " + name + " has not "
+                                    "been found in any conf file. Setting it "
+                                    "in " + default_file)
+                        f = os.path.join(tmp_dir, default_file)
+                        write_in_props_file(f, name, value, True)
+
+            # Copy back the files to all hosts
+            self._copy_conf(tmp_dir, hosts)
+
+    def _get_conf_files(self, host):
+
+        action = Remote("ls " + self.conf_dir + "/*.conf", [host])
+        action.run()
+        output = action.processes[0].stdout
+
+        remote_conf_files = []
+        for f in output.split():
+            remote_conf_files.append(os.path.join(self.conf_dir, f))
+
+        tmp_dir = "/tmp/mliroz_temp_spark/"
+        if not os.path.exists(tmp_dir):
+            os.makedirs(tmp_dir)
+
+        action = Get([host], remote_conf_files, tmp_dir)
+        action.run()
+
+        temp_conf_files = [os.path.join(tmp_dir, f) for f in
+                           os.listdir(tmp_dir)]
+
+        return temp_conf_files
+
+    def get_conf_param(self, param_name, default=None, node=None):
+
+        # Copy conf files from first host in the cluster
+        if node is None:
+            node = self.hosts[0]
+        temp_conf_files = self._get_conf_files(node)
+
+        # Look in conf files
+        for f in temp_conf_files:
+            value = read_param_in_props_file(f, param_name)
+            if value:
+                return value
+
+        return default
+
+    def get_conf(self, param_names, node=None):
+
+        params = {}
+        remaining_param_names = set(param_names)
+
+        # Copy conf files from first host in the cluster
+        if node is None:
+            node = self.hosts[0]
+        temp_conf_files = self._get_conf_files(node)
+
+        # Look in conf files
+        for f in temp_conf_files:
+            fparams = read_in_props_file(f, remaining_param_names)
+            for p in fparams:
+                if fparams[p]:
+                    params[p] = fparams[p]
+                    remaining_param_names.discard(p)
+
+        return params
 
     def is_on_top_of_yarn(self):
         return self.mode == YARN_MODE
