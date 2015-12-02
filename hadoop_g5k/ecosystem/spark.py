@@ -378,7 +378,9 @@ class SparkCluster(object):
                 self.hc.execute("fs -mkdir -p " + self.evs_log_dir)
 
         # 3. Specify environment variables
-        command = "cat >> " + self.conf_dir + "/spark-env.sh << EOF\n"
+        env_file = self.conf_dir + "/spark-env.sh"
+
+        command = "cat >> " + env_file + " << EOF\n"
         command += "JAVA_HOME=" + self.java_home + "\n"
         command += "SPARK_LOG_DIR=" + self.logs_dir + "\n"
         if self.hc:
@@ -386,7 +388,8 @@ class SparkCluster(object):
         if self.mode == YARN_MODE:
             command += "YARN_CONF_DIR=" + self.hc.conf_dir + "\n"
         command += "EOF\n"
-        command += "chmod +x " + self.conf_dir + "/spark-env.sh"
+        command += "echo SPARK_PUBLIC_DNS=$(hostname) >> " + env_file
+        command += " && chmod +x " + env_file
         action = Remote(command, self.hosts)
         action.run()
 
@@ -470,6 +473,7 @@ class SparkCluster(object):
 
         defs_file = conf_dir + "/spark-defaults.conf"
 
+        # Configure master
         spark_master = read_param_in_props_file(defs_file, "spark.master")
 
         if spark_master and spark_master.startswith("local"):
@@ -499,6 +503,7 @@ class SparkCluster(object):
                                 create_if_absent=True,
                                 override=True)
 
+        # Configure slaves
         with open(conf_dir + "/slaves", "w") as slaves_file:
             for s in self.hosts:
                 slaves_file.write(s.address + "\n")
