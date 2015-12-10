@@ -1,23 +1,18 @@
 import getpass
 import os
 import shutil
-import sys
 import tempfile
-
-from abc import abstractmethod
 
 from ConfigParser import ConfigParser
 from subprocess import call
 
-from execo.action import Put, TaktukPut, Get, Remote, TaktukRemote, \
+from execo.action import TaktukPut, Get, Remote, TaktukRemote, \
     SequentialActions
 from execo.log import style
 from execo.process import SshProcess
 from execo_engine import logger
-from execo_g5k import get_host_attributes
 
-from hadoop_g5k.util import ColorDecorator, replace_in_xml_file, \
-    create_xml_file
+from hadoop_g5k.util.conf import replace_in_xml_file, create_xml_file
 
 # Default parameters
 DEFAULT_HIVE_BASE_DIR = "/tmp/hive"

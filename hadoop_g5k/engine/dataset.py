@@ -6,8 +6,9 @@ from abc import ABCMeta, abstractmethod
 from execo.action import Put, TaktukRemote
 from execo.process import SshProcess
 from execo_engine import logger
+
 from hadoop_g5k.objects import HadoopJarJob
-from hadoop_g5k.util import import_function
+from hadoop_g5k.util.util import import_function
 
 
 class Dataset(object):

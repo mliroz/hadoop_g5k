@@ -4,7 +4,6 @@ import re
 import shutil
 import sys
 import tempfile
-
 from ConfigParser import ConfigParser
 
 from execo.log import style
@@ -12,12 +11,12 @@ from execo.action import Put, TaktukPut, Get, Remote, TaktukRemote, \
     SequentialActions
 from execo.process import SshProcess
 from execo_engine import logger
-from execo_g5k.api_utils import get_host_cluster
-from hadoop_g5k.hardware import G5kDeploymentHardware
 
-from hadoop_g5k.objects import HadoopJarJob, HadoopTopology, HadoopException
-from hadoop_g5k.util import ColorDecorator, replace_in_xml_file, \
-    read_in_xml_file, read_param_in_xml_file, check_java_version, get_java_home
+from hadoop_g5k.objects import HadoopTopology, HadoopException
+from hadoop_g5k.util import get_java_home, ColorDecorator, hw_manager, \
+    check_java_version
+from hadoop_g5k.util.conf import replace_in_xml_file, read_in_xml_file, \
+    read_param_in_xml_file
 
 # Configuration files
 CORE_CONF_FILE = "core-site.xml"
@@ -95,8 +94,8 @@ class HadoopCluster(object):
           hosts (list of Host):
             The hosts to be assigned a topology.
           topo_list (list of str, optional):
-            The racks to be assigned to each host. len(hosts) should be equal to
-            len(topo_list).
+            The racks to be assigned to each host. len(hosts) should be equal
+            to len(topo_list).
           configFile (str, optional):
             The path of the config file to be used.
         """
@@ -137,9 +136,9 @@ class HadoopCluster(object):
         self.topology = HadoopTopology(hosts, topo_list)
 
         # Store cluster information
-        self.hw = G5kDeploymentHardware()
+        self.hw = hw_manager.make_deployment_hardware()
         self.hw.add_hosts(self.hosts)
-        self.master_cluster = self.hw.get_cluster(get_host_cluster(self.master))
+        self.master_cluster = self.hw.get_host_cluster(self.master)
 
         # Create a string to display the topology
         t = {v: [] for v in self.topology.topology.values()}
@@ -149,9 +148,11 @@ class HadoopCluster(object):
                               ' '.join(map(lambda x: style.host(x.split('.')[0]), v))
                               for k, v in t.iteritems()])
         
-        logger.info("Hadoop cluster created with master %s, hosts %s and topology %s",
+        logger.info("Hadoop cluster created with master %s, hosts %s and "
+                    "topology %s",
                     style.host(self.master.address), 
-                    ' '.join([style.host(h.address.split('.')[0]) for h in self.hosts]),
+                    ' '.join([style.host(h.address.split('.')[0])
+                              for h in self.hosts]),
                     log_topo)
 
     def bootstrap(self, tar_file):

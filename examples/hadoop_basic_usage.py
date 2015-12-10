@@ -1,7 +1,7 @@
 import os
 
 from execo_g5k import get_oar_job_nodes
-from hadoop_g5k import HadoopCluster, HadoopJarJob, HadoopV2Cluster
+from hadoop_g5k import HadoopJarJob, HadoopV2Cluster
 
 # Parameters
 hosts = get_oar_job_nodes(int(os.environ["OAR_JOB_ID"]), None)

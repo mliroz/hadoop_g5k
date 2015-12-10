@@ -2,7 +2,7 @@ import os
 import stat
 
 from execo_engine import logger
-from execo_g5k.api_utils import get_host_attributes
+from hadoop_g5k.util import hw_manager
 
 
 class HadoopException(Exception):
@@ -38,12 +38,7 @@ class HadoopTopology(object):
         logger.info("Discovering topology automatically")
         self.topology = {}
         for h in hosts:
-            nw_adapters = get_host_attributes(h)[u'network_adapters']
-            for nwa in nw_adapters:
-                if (u'network_address' in nwa and
-                            nwa[u'network_address'] == h.address):
-                    self.topology[h] = "/" + nwa[u'switch']
-                    break
+            self.topology[h] = "/" + hw_manager.get_switch(h)
 
     def get_rack(self, host):
         """Return the rack corresponding to a host.

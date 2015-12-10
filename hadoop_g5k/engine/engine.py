@@ -21,8 +21,7 @@ from networkx import DiGraph, NetworkXUnfeasible, topological_sort
 
 from hadoop_g5k.cluster import HadoopCluster
 from hadoop_g5k.objects import HadoopJarJob
-from hadoop_g5k.util import import_class
-
+from hadoop_g5k.util.util import import_class
 
 DEFAULT_DATA_BASE_DIR = "/tests/data"
 DEFAULT_OUT_BASE_DIR = "/tests/out"

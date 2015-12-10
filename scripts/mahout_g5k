@@ -2,19 +2,17 @@
 
 import os
 import sys
-
 from argparse import ArgumentParser, RawTextHelpFormatter
-from execo import Host
 
+from execo import Host
 from execo.log import style
 from execo_engine import logger
 
 from hadoop_g5k.cluster import HadoopCluster
 from hadoop_g5k.ecosystem.mahout import MahoutCluster
-from hadoop_g5k.serialization import generate_new_id, \
+from hadoop_g5k.util.serialization import generate_new_id, \
     get_default_id, deserialize_cluster, remove_cluster, serialize_cluster, \
     cluster_exists, link_to_hadoop_cluster
-
 
 if __name__ == "__main__":
 

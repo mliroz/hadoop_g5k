@@ -1,11 +1,9 @@
 import os
-import re
 import shutil
 import sys
 import tempfile
 
 from abc import abstractmethod
-
 from ConfigParser import ConfigParser
 from subprocess import call
 
@@ -14,11 +12,10 @@ from execo.action import Put, TaktukPut, Get, Remote, TaktukRemote, \
 from execo.log import style
 from execo.process import SshProcess
 from execo_engine import logger
-from execo_g5k import get_host_cluster
-from hadoop_g5k.hardware import G5kDeploymentHardware
 
-from hadoop_g5k.util import ColorDecorator, write_in_props_file, \
-    read_param_in_props_file, check_java_version, get_java_home, \
+from hadoop_g5k.util import ColorDecorator, check_java_version, get_java_home, \
+    hw_manager
+from hadoop_g5k.util.conf import write_in_props_file, read_param_in_props_file, \
     read_in_props_file
 
 # Configuration files
@@ -305,9 +302,9 @@ class SparkCluster(object):
                                  "Hadoop cluster.")
 
         # Store cluster information
-        self.hw = G5kDeploymentHardware()
+        self.hw = hw_manager.make_deployment_hardware()
         self.hw.add_hosts(self.hosts)
-        self.master_cluster = self.hw.get_cluster(get_host_cluster(self.master))
+        self.master_cluster = self.hw.get_host_cluster(self.master)
 
         # Store reference to Hadoop cluster and check if mandatory
         self.hc = hadoop_cluster
