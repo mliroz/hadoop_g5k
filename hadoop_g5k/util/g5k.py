@@ -23,7 +23,7 @@ class G5kHardwareManager(HardwareManager):
 
     def get_memory_and_cores(self, host):
         host_attrs = get_host_attributes(host)
-        cores = host_attrs[u'architecture'][u'smt_size']
+        cores = host_attrs[u'architecture'][u'nb_cores']
         mem = host_attrs[u'main_memory'][u'ram_size'] / (1024 * 1024)
 
         return mem, cores
